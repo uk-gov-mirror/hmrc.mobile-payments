@@ -178,7 +178,7 @@ class LivePaymentController @Inject() (
             withValidJson[PayByCardRequestGeneric] { payByCardRequest =>
               getNinoFromAuth.flatMap { nino =>
                 getSaUTRFromAuth.flatMap { sautrOpt =>
-                  if (sautrOpt.exists(_.utr.contains(payByCardRequest.reference))) {
+                  if (sautrOpt.exists(_.utr == payByCardRequest.reference)) {
                     paymentsService
                       .getPayByCardUrl(
                         payByCardRequest,

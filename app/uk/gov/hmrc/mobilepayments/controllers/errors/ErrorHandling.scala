@@ -76,6 +76,10 @@ trait ErrorHandling {
         logger.warn("Malformed JSON")
         Status(ErrorMalformedRequest.httpStatusCode)
 
+      case ex: FailToMatchTaxIdOnAuth =>
+        logger.warn("Unauthorised! Failure to match URL/Request UTR against Auth UTR")
+        Status(ErrorUnauthorizedUpstream.httpStatusCode)
+
       case e: Exception =>
         logger.warn(s"Native Error - $app Internal server error 2: ${e.getMessage}", e)
         Status(ErrorInternalServerError.httpStatusCode)

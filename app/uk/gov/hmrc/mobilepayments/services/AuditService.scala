@@ -36,7 +36,7 @@ class AuditService @Inject() (auditConnector: AuditConnector, @Named("appName") 
     sessionData: SessionDataResponse,
     journeyId: String
   )(implicit hc: HeaderCarrier, executionContext: ExecutionContext): Future[AuditResult] = {
-    val taxType = if (sessionData.origin == AppSa) TaxTypeEnum.appSelfAssessment else TaxTypeEnum.appSimpleAssessment
+    val taxType: TaxTypeEnum.Value = if (sessionData.origin == AppSa) TaxTypeEnum.appSelfAssessment else TaxTypeEnum.appSimpleAssessment
     auditConnector.sendExtendedEvent(
       ExtendedDataEvent(
         appName,

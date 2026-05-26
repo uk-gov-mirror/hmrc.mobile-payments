@@ -28,12 +28,14 @@ import scala.concurrent.{ExecutionContext, Future}
 trait AuthorisationStub extends BaseSpec {
 
   type GrantAccess = ConfidenceLevel ~ Enrolments
+  type GrantAccess1 = Option[String] ~ Enrolments
 
   val enrolments: Set[Enrolment] =
     Set(Enrolment("IR-SA", identifiers = Seq(EnrolmentIdentifier("UTR", "12212321")), state = "Activated"))
 
   val confidenceLevel: ConfidenceLevel = ConfidenceLevel.L200
   val authorisedResponse: GrantAccess = new ~(confidenceLevel, Enrolments(enrolments))
+  val utrAndEnrolmentResponse: GrantAccess1 = new ~(Some("12212321"), Enrolments(enrolments))
   val authorisedLowCLResponse: GrantAccess = new ~(ConfidenceLevel.L50, Enrolments(enrolments))
 
   def stubAuthorisationGrantAccess(response: GrantAccess)(implicit authConnector: AuthConnector) =
@@ -51,6 +53,12 @@ trait AuthorisationStub extends BaseSpec {
   def stubGetNinoFromAuth(response: Option[String])(implicit authConnector: AuthConnector) =
     (authConnector
       .authorise(_: Predicate, _: Retrieval[Option[String]])(_: HeaderCarrier, _: ExecutionContext))
+      .expects(*, *, *, *)
+      .returning(Future successful response)
+
+  def stubGetUTRFromAuth(response: GrantAccess1)(implicit authConnector: AuthConnector) =
+    (authConnector
+      .authorise(_: Predicate, _: Retrieval[GrantAccess1])(_: HeaderCarrier, _: ExecutionContext))
       .expects(*, *, *, *)
       .returning(Future successful response)
 }

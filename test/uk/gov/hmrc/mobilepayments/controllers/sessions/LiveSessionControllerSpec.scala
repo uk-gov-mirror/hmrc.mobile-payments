@@ -18,7 +18,7 @@ package uk.gov.hmrc.mobilepayments.controllers.sessions
 
 import org.scalamock.handlers.CallHandler
 import play.api.libs.json.Json
-import play.api.test.Helpers._
+import play.api.test.Helpers.*
 import play.api.test.{FakeRequest, Helpers}
 import uk.gov.hmrc.auth.core.{AuthConnector, ConfidenceLevel}
 import uk.gov.hmrc.http.{HeaderCarrier, UpstreamErrorResponse}
@@ -35,18 +35,14 @@ import uk.gov.hmrc.mobilepayments.services.{AuditService, OpenBankingService, Sh
 import java.time.LocalDate
 import scala.concurrent.{ExecutionContext, Future}
 
-class LiveSessionControllerSpec
-    extends BaseSpec
-    with AuthorisationStub
-    with MobilePaymentsTestData
-    with ShutteringMock {
+class LiveSessionControllerSpec extends BaseSpec with AuthorisationStub with MobilePaymentsTestData with ShutteringMock {
 
   private val mockOpenBankingService: OpenBankingService = mock[OpenBankingService]
-  private val sessionDataId:          String             = "51cc67d6-21da-11ec-9621-0242ac130002"
+  private val sessionDataId: String = "51cc67d6-21da-11ec-9621-0242ac130002"
 
   implicit val mockShutteringService: ShutteringService = mock[ShutteringService]
-  implicit val mockAuthConnector:     AuthConnector     = mock[AuthConnector]
-  implicit val mockAuditService:      AuditService      = mock[AuditService]
+  implicit val mockAuthConnector: AuthConnector = mock[AuthConnector]
+  implicit val mockAuditService: AuditService = mock[AuditService]
 
   private val sut = new LiveSessionController(
     mockAuthConnector,
@@ -60,11 +56,12 @@ class LiveSessionControllerSpec
     "return 200" in {
       stubAuthorisationGrantAccess(authorisedResponse)
       shutteringDisabled()
+      stubGetUTRFromAuth(utrAndEnrolmentResponse)
       mockCreateSession(Future successful createSessionDataResponse)
 
       val request = FakeRequest("POST", "/sessions")
         .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
-        .withBody(Json.obj("amount" -> 1234, "saUtr" -> "CS700100A"))
+        .withBody(Json.obj("amount" -> 1234, "reference" -> "12212321"))
 
       val result = sut.createSession(journeyId)(request)
       status(result) shouldBe 200
@@ -72,33 +69,35 @@ class LiveSessionControllerSpec
       response.sessionDataId.value shouldEqual sessionDataId
     }
   }
+
+  // "Calling create session with taxType as SimpleAssessment, reference and amountInPence" should {
+//    "return 200" in {
+//      stubAuthorisationGrantAccess(authorisedResponse)
+//      shutteringDisabled()
+//      stubGetUTRFromAuth(utrAndEnrolmentResponse)
+//      mockCreateSession(Future successful createSessionDataResponse)
+//
+//      val request = FakeRequest("POST", "/sessions")
+//        .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
+//        .withBody(Json.obj("amountInPence" -> 1234, "reference" -> "12212321", "taxType" -> "appSimpleAssessment"))
+//
+//      val result = sut.createSession(journeyId)(request)
+//      status(result) shouldBe 200
+//      val response = contentAsJson(result).as[CreateSessionDataResponse]
+//      response.sessionDataId.value shouldEqual sessionDataId
+//    }
+  // }
 
   "Calling create session with taxType as SelfAssessment, reference and amountInPence" should {
     "return 200" in {
       stubAuthorisationGrantAccess(authorisedResponse)
       shutteringDisabled()
+      stubGetUTRFromAuth(utrAndEnrolmentResponse)
       mockCreateSession(Future successful createSessionDataResponse)
 
       val request = FakeRequest("POST", "/sessions")
         .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
-        .withBody(Json.obj("amountInPence" -> 1234, "reference" -> "CS700100A", "taxType" -> "appSimpleAssessment"))
-
-      val result = sut.createSession(journeyId)(request)
-      status(result) shouldBe 200
-      val response = contentAsJson(result).as[CreateSessionDataResponse]
-      response.sessionDataId.value shouldEqual sessionDataId
-    }
-  }
-
-  "Calling create session with taxType as SimpleAssessment, reference and amountInPence" should {
-    "return 200" in {
-      stubAuthorisationGrantAccess(authorisedResponse)
-      shutteringDisabled()
-      mockCreateSession(Future successful createSessionDataResponse)
-
-      val request = FakeRequest("POST", "/sessions")
-        .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
-        .withBody(Json.obj("amountInPence" -> 1234, "reference" -> "CS700100A", "taxType" -> "appSelfAssessment"))
+        .withBody(Json.obj("amountInPence" -> 1234, "reference" -> "12212321", "taxType" -> "appSelfAssessment"))
 
       val result = sut.createSession(journeyId)(request)
       status(result) shouldBe 200
@@ -111,10 +110,11 @@ class LiveSessionControllerSpec
     "return 400" in {
       stubAuthorisationGrantAccess(authorisedResponse)
       shutteringDisabled()
+      stubGetUTRFromAuth(utrAndEnrolmentResponse)
       mockCreateSession(Future failed UpstreamErrorResponse("Error", 400, 400))
       val request = FakeRequest("POST", "/sessions")
         .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
-        .withBody(Json.obj("bad-key" -> 1234, "saUtr" -> "CS700100A"))
+        .withBody(Json.obj("bad-key" -> 1234, "saUtr" -> "12212321"))
 
       val result = sut.createSession(journeyId)(request)
       status(result) shouldBe 400
@@ -125,11 +125,12 @@ class LiveSessionControllerSpec
     "return 401" in {
       stubAuthorisationGrantAccess(authorisedResponse)
       shutteringDisabled()
+      stubGetUTRFromAuth(utrAndEnrolmentResponse)
       mockCreateSession(Future failed UpstreamErrorResponse("Error", 401, 401))
 
       val request = FakeRequest("POST", "/sessions")
         .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
-        .withBody(Json.obj("amount" -> 1234, "saUtr" -> "CS700100A"))
+        .withBody(Json.obj("amount" -> 1234, "saUtr" -> "12212321"))
 
       val result = sut.createSession(journeyId)(request)
       status(result) shouldBe 401
@@ -153,11 +154,12 @@ class LiveSessionControllerSpec
     "return 500" in {
       stubAuthorisationGrantAccess(authorisedResponse)
       shutteringDisabled()
+      stubGetUTRFromAuth(utrAndEnrolmentResponse)
       mockCreateSession(Future failed UpstreamErrorResponse("Error", 502, 502))
 
       val request = FakeRequest("POST", "/sessions")
         .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
-        .withBody(Json.obj("amount" -> 1234, "saUtr" -> "CS700100A"))
+        .withBody(Json.obj("amount" -> 1234, "saUtr" -> "12212321"))
 
       val result = sut.createSession(journeyId)(request)
       status(result) shouldBe 500
@@ -168,6 +170,7 @@ class LiveSessionControllerSpec
     "return 200" in {
       stubAuthorisationGrantAccess(authorisedResponse)
       shutteringDisabled()
+
       mockGetSession(Future successful sessionDataResponse)
 
       val request = FakeRequest("Get", s"/sessions/$sessionDataId")
@@ -178,9 +181,9 @@ class LiveSessionControllerSpec
       val response = contentAsJson(result).as[SessionDataResponse]
       response.sessionDataId shouldEqual sessionDataId
       response.amountInPence shouldEqual 12564
-      response.bankId shouldEqual Some("some-bank-id")
-      response.paymentDate shouldEqual None
-      response.reference shouldEqual "CS700100AK"
+      response.bankId        shouldEqual Some("some-bank-id")
+      response.paymentDate   shouldEqual None
+      response.reference     shouldEqual "CS700100AK"
     }
   }
 
@@ -198,10 +201,10 @@ class LiveSessionControllerSpec
       val response = contentAsJson(result).as[SessionDataResponse]
       response.sessionDataId shouldEqual sessionDataId
       response.amountInPence shouldEqual 12564
-      response.bankId shouldEqual Some("some-bank-id")
-      response.paymentDate shouldEqual Some(LocalDate.parse("2021-12-01"))
-      response.reference shouldEqual "CS700100AK"
-      response.email.get shouldEqual ("test@test.com")
+      response.bankId        shouldEqual Some("some-bank-id")
+      response.paymentDate   shouldEqual Some(LocalDate.parse("2021-12-01"))
+      response.reference     shouldEqual "CS700100AK"
+      response.email.get     shouldEqual "test@test.com"
     }
   }
 

@@ -16,7 +16,7 @@
 
 package uk.gov.hmrc.mobilepayments.domain.dto.request
 
-import play.api.libs.json._
+import play.api.libs.json.*
 
 object TaxTypeEnum extends Enumeration {
 
@@ -30,9 +30,9 @@ object TaxTypeEnum extends Enumeration {
 
     override def reads(json: JsValue): JsResult[TaxTypeEnum.Value] =
       json.as[String] match {
-        case "appSimpleAssessment" => JsSuccess(appSimpleAssessment)
+        //  case "appSimpleAssessment" => JsSuccess(appSimpleAssessment)
         case "appSelfAssessment" => JsSuccess(appSelfAssessment)
-        case e => JsError(s"$e not recognised")
+        case e                   => JsError(s"$e not recognised")
       }
   }
 }

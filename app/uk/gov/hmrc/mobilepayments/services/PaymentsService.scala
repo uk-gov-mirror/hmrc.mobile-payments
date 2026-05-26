@@ -25,6 +25,8 @@ import uk.gov.hmrc.mobilepayments.domain.{Payment, PaymentRecordListFromApi}
 import uk.gov.hmrc.mobilepayments.domain.dto.response.{LatestPaymentsResponse, PayByCardResponse}
 import uk.gov.hmrc.mobilepayments.domain.types.JourneyId
 import uk.gov.hmrc.mobilepayments.models.payapi.PaymentStatuses.Successful
+import cats.syntax.all.*
+import play.api.Logger
 
 import java.time.LocalDate
 import javax.inject.Inject
@@ -32,26 +34,41 @@ import scala.concurrent.{ExecutionContext, Future}
 
 class PaymentsService @Inject() (connector: PaymentsConnector) {
 
+  val logger: Logger = Logger(this.getClass)
+
   def getLatestPayments(
     utr: Option[String],
     reference: Option[String],
     taxType: Option[TaxTypeEnum.Value],
     journeyId: JourneyId
-  )(implicit executionContext: ExecutionContext, headerCarrier: HeaderCarrier): Future[Either[String, Option[LatestPaymentsResponse]]] =
-    connector.getPayments(utr, reference, taxType, journeyId) map {
-      case Right(payments) => {
-        val recentPayments: List[Payment] =
-          payments.map(paymentsList => filterPaymentsOlderThan14DaysOrUnsuccessful(paymentsList)).getOrElse(List.empty)
-        if (recentPayments.isEmpty) Right(None)
-        else
-          Right(
-            Some(LatestPaymentsResponse.fromPayments(recentPayments))
-          )
-      }
-      case Right(None) => Right(None)
-      case Left(e)     => Left(e)
-      case _           => Left("Error calling pay-api")
+  )(implicit executionContext: ExecutionContext, headerCarrier: HeaderCarrier): Future[Either[String, Option[LatestPaymentsResponse]]] = {
+    (utr, reference) match {
+      case (Some(sautr), Some(referenceValue)) =>
+        if (sautr == referenceValue) {
+          connector.getPayments(utr, reference, taxType, journeyId) map {
+            case Right(payments) =>
+              val recentPayments: List[Payment] =
+                payments.map(paymentsList => filterPaymentsOlderThan14DaysOrUnsuccessful(paymentsList)).getOrElse(List.empty)
+              if (recentPayments.isEmpty) Right(None)
+              else
+                Right(
+                  Some(LatestPaymentsResponse.fromPayments(recentPayments))
+                )
+
+            case Right(None) => Right(None)
+            case Left(e)     => Left(e)
+            case _           => Left("Error calling pay-api")
+          }
+        } else {
+          logger.info("Unauthorized! Reference in payload doesn't match with logged in UTR")
+          Future.successful(Left("Unauthorized! Reference in payload doesn't match with logged in UTR"))
+        }
+      case _ =>
+        logger.info("Unauthorized! UTR or reference is missing from payload/Enrolments")
+        Future.successful(Left("Unauthorized! UTR or reference is missing from payload/Enrolments"))
     }
+
+  }
 
   def getPayByCardUrl(
     request: PayByCardRequestGeneric,

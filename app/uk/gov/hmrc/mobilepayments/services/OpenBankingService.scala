@@ -20,7 +20,7 @@ import com.google.inject.{Inject, Singleton}
 import uk.gov.hmrc.domain.SaUtr
 import uk.gov.hmrc.http.{BadRequestException, HeaderCarrier}
 import uk.gov.hmrc.mobilepayments.connectors.OpenBankingConnector
-import uk.gov.hmrc.mobilepayments.controllers.errors.MalformedRequestException
+import uk.gov.hmrc.mobilepayments.controllers.errors.{FailToMatchTaxIdOnAuth, MalformedRequestException}
 import uk.gov.hmrc.mobilepayments.domain.dto.request.{CreateSessionRequest, SelfAssessmentOriginSpecificData, SimpleAssessmentOriginSpecificData, TaxTypeEnum}
 import uk.gov.hmrc.mobilepayments.domain.dto.response.*
 import uk.gov.hmrc.mobilepayments.domain.dto.response.Origins.*
@@ -53,9 +53,11 @@ class OpenBankingService @Inject() (connector: OpenBankingConnector, @Named("ope
     if (request.taxType.isDefined) {
       request.taxType match {
         case Some(TaxTypeEnum.appSelfAssessment) =>
-          (request.amountInPence, request.reference) match {
-            case (Some(amountInPence), Some(reference)) =>
-              connector.createSession(amountInPence, SelfAssessmentOriginSpecificData(SaUtr(reference)), journeyId)
+          (request.amountInPence, request.reference, request.saUtr) match {
+            case (Some(amountInPence), Some(reference), Some(sautr)) =>
+              if (reference == sautr.utr)
+                connector.createSession(amountInPence, SelfAssessmentOriginSpecificData(SaUtr(reference)), journeyId)
+              else throw new FailToMatchTaxIdOnAuth
             case _ =>
               throw new MalformedRequestException("Malformed Json")
           }

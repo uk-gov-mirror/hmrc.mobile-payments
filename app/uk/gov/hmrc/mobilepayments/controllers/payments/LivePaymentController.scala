@@ -18,7 +18,7 @@ package uk.gov.hmrc.mobilepayments.controllers.payments
 
 import play.api.libs.json.{JsValue, Json}
 import play.api.mvc.{Action, AnyContent, BodyParser, ControllerComponents}
-import uk.gov.hmrc.auth.core.AuthConnector
+import uk.gov.hmrc.auth.core.{AuthConnector, AuthorisationException, InsufficientEnrolments}
 import uk.gov.hmrc.http.{HeaderCarrier, SessionId}
 import uk.gov.hmrc.mobilepayments.controllers.ControllerChecks
 import uk.gov.hmrc.mobilepayments.controllers.action.AccessControl
@@ -33,7 +33,7 @@ import uk.gov.hmrc.play.bootstrap.backend.controller.BackendController
 import uk.gov.hmrc.play.http.HeaderCarrierConverter.fromRequest
 
 import javax.inject.{Inject, Named, Singleton}
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{ExecutionContext, Future}
 
 @Singleton()
 class LivePaymentController @Inject() (
@@ -153,10 +153,14 @@ class LivePaymentController @Inject() (
         withShuttering(shuttered) {
           withErrorWrapper {
             withValidJson[LatestPaymentsRequest] { latestPaymentsRequest =>
-              paymentsService.getLatestPayments(None, Some(latestPaymentsRequest.reference), Some(latestPaymentsRequest.taxType), journeyId) map {
-                case Right(None)     => NotFound
-                case Right(payments) => Ok(Json.toJson(payments))
-                case Left(e)         => InternalServerError(e)
+              getSaUTRFromAuth.flatMap { sautrOpt =>
+                paymentsService
+                  .getLatestPayments(sautrOpt.map(_.utr), Some(latestPaymentsRequest.reference), Some(latestPaymentsRequest.taxType), journeyId) map {
+                  case Right(None)                 => NotFound
+                  case Right(payments)             => Ok(Json.toJson(payments))
+                  case Left(s"Unauthorized! $msg") => Unauthorized(s"Unauthorized! $msg")
+                  case Left(e)                     => InternalServerError(e)
+                }
               }
             }
           }
@@ -173,13 +177,23 @@ class LivePaymentController @Inject() (
           withErrorWrapper {
             withValidJson[PayByCardRequestGeneric] { payByCardRequest =>
               getNinoFromAuth.flatMap { nino =>
-                paymentsService
-                  .getPayByCardUrl(
-                    payByCardRequest,
-                    nino,
-                    journeyId
-                  )
-                  .map(response => Ok(Json.toJson(response)))
+                getSaUTRFromAuth.flatMap { sautrOpt =>
+                  if (sautrOpt.exists(_.utr.contains(payByCardRequest.reference))) {
+                    paymentsService
+                      .getPayByCardUrl(
+                        payByCardRequest,
+                        nino,
+                        journeyId
+                      )
+                      .map(response => Ok(Json.toJson(response)))
+
+                  } else {
+                    Future.successful(Unauthorized("User is not Authorised to pay by Card"))
+
+                  }
+
+                }
+
               }
             }
           }

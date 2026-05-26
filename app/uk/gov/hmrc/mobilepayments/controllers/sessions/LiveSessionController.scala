@@ -58,12 +58,16 @@ class LiveSessionController @Inject() (
         withShuttering(shuttered) {
           withErrorWrapper {
             withValidJson[CreateSessionRequest] { createPaymentRequest =>
-              openBankingService
-                .createSession(
-                  createPaymentRequest,
-                  journeyId
-                )
-                .map(response => Ok(Json.toJson[CreateSessionDataResponse](response)))
+              getSaUTRFromAuth.flatMap { sautrOpt =>
+                val updatedCreatePaymentRequest = createPaymentRequest.copy(saUtr = sautrOpt)
+                openBankingService
+                  .createSession(
+                    updatedCreatePaymentRequest,
+                    journeyId
+                  )
+                  .map(response => Ok(Json.toJson[CreateSessionDataResponse](response)))
+              }
+             
             }
           }
         }

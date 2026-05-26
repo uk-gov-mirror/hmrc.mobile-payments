@@ -1,5 +1,6 @@
 {
   "amountInPence": 10285,
   "reference": "CS700100A",
+  "saUtr": "CS700100A",
   "taxType": "appSelfAssessment"
 }

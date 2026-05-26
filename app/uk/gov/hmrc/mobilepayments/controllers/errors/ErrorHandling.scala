@@ -18,17 +18,16 @@ package uk.gov.hmrc.mobilepayments.controllers.errors
 
 import play.api.mvc.Result
 import play.api.{Logger, mvc}
-import uk.gov.hmrc.api.controllers._
+import uk.gov.hmrc.api.controllers.*
 import uk.gov.hmrc.auth.core.MissingBearerToken
-import uk.gov.hmrc.http.{NotFoundException, _}
+import uk.gov.hmrc.http.{NotFoundException, *}
 import uk.gov.hmrc.play.bootstrap.backend.controller.BackendBaseController
 
 import scala.concurrent.{ExecutionContext, Future}
 
 class MalformedRequestException(message: String = "") extends HttpException(message, 400)
 
-case object ErrorUnauthorizedUpstream
-    extends ErrorResponse(401, "UNAUTHORIZED", "Upstream service such as auth returned 401")
+case object ErrorUnauthorizedUpstream extends ErrorResponse(401, "UNAUTHORIZED", "Upstream service such as auth returned 401")
 
 case object ErrorMalformedRequest extends ErrorResponse(400, "MALFORMED", "Malformed JSON")
 
@@ -36,7 +35,7 @@ class GrantAccessException(message: String) extends HttpException(message, 401)
 
 class AccountWithLowCL extends GrantAccessException("Unauthorised! Account with low CL!")
 
-class FailToMatchTaxIdOnAuth extends GrantAccessException("Unauthorised! Failure to match URL UTR against Auth UTR")
+class FailToMatchTaxIdOnAuth extends GrantAccessException("Unauthorised! Failure to match URL/Request UTR against Auth UTR")
 
 class UtrNotFoundOnAccount extends GrantAccessException("Unauthorised! UTR not found on account!")
 

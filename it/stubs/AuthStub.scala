@@ -16,7 +16,7 @@
 
 package stubs
 
-import com.github.tomakehurst.wiremock.client.WireMock._
+import com.github.tomakehurst.wiremock.client.WireMock.*
 import com.github.tomakehurst.wiremock.stubbing.StubMapping
 
 object AuthStub {
@@ -127,6 +127,45 @@ object AuthStub {
                          |  "nino": "$nino"
                          |}
           """.stripMargin)
+        )
+    )
+
+  def getUTRFromAuth(saUtr: String = "CS700100A", activeUtr: Boolean = true): StubMapping =
+    stubFor(
+      post(urlEqualTo("/auth/authorise"))
+        .atPriority(0)
+        .withRequestBody(
+          equalToJson(
+            s"""
+               |{
+               |  "authorise": [],
+               |  "retrieve": [
+               |    "saUtr",
+               |    "allEnrolments"
+               |  ]
+               |}
+             """.stripMargin,
+            true,
+            false
+          )
+        )
+        .willReturn(
+          aResponse()
+            .withStatus(200)
+            .withBody(s"""
+                 |{
+                 |  "allEnrolments": [{
+                 |      "key": "IR-SA",
+                 |      "identifiers": [{
+                 |        "key": "UTR",
+                 |        "value": "$saUtr"
+                 |      }],
+                 |      "state": "${if (activeUtr) "Activated" else "Deactivated"}"
+                 |  }],
+                 |  "sautr": "$saUtr"
+                 |}
+
+               """.stripMargin)
         )
     )
 }

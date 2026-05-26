@@ -44,7 +44,7 @@ class PaymentsServiceSpec extends BaseSpec with MobilePaymentsTestData {
       mockLatestPayments(Future successful Right(Some(paymentsResponse())))
 
       val result =
-        Await.result(sut.getLatestPayments(None, Some(saUtr.value), Some(TaxTypeEnum.appSelfAssessment), journeyId), 0.5.seconds)
+        Await.result(sut.getLatestPayments(Some(saUtr.value), Some(saUtr.value), Some(TaxTypeEnum.appSelfAssessment), journeyId), 0.5.seconds)
       result.toOption.get.get.payments.size               shouldBe 2
       result.toOption.get.get.payments.head.amountInPence shouldBe 11100
     }
@@ -53,7 +53,7 @@ class PaymentsServiceSpec extends BaseSpec with MobilePaymentsTestData {
       mockLatestPayments(Future successful Right(Some(paymentsResponse(LocalDate.of(2022, 5, 1)))))
 
       val result =
-        Await.result(sut.getLatestPayments(None, Some(saUtr.value), Some(TaxTypeEnum.appSelfAssessment), journeyId), 0.5.seconds)
+        Await.result(sut.getLatestPayments(Some(saUtr.value), Some(saUtr.value), Some(TaxTypeEnum.appSelfAssessment), journeyId), 0.5.seconds)
       result.toOption.get shouldBe None
     }
 
@@ -61,7 +61,7 @@ class PaymentsServiceSpec extends BaseSpec with MobilePaymentsTestData {
       mockLatestPayments(Future successful Right(None))
 
       val result =
-        Await.result(sut.getLatestPayments(None, Some(saUtr.value), Some(TaxTypeEnum.appSelfAssessment), journeyId), 0.5.seconds)
+        Await.result(sut.getLatestPayments(Some(saUtr.value), Some(saUtr.value), Some(TaxTypeEnum.appSelfAssessment), journeyId), 0.5.seconds)
       result.toOption.get shouldBe None
     }
 
@@ -69,8 +69,22 @@ class PaymentsServiceSpec extends BaseSpec with MobilePaymentsTestData {
       mockLatestPayments(Future successful Left("Error while calling pay api"))
 
       val result =
-        Await.result(sut.getLatestPayments(None, Some(saUtr.value), Some(TaxTypeEnum.appSelfAssessment), journeyId), 0.5.seconds)
+        Await.result(sut.getLatestPayments(Some(saUtr.value), Some(saUtr.value), Some(TaxTypeEnum.appSelfAssessment), journeyId), 0.5.seconds)
       result.swap.getOrElse("") shouldBe "Error while calling pay api"
+    }
+
+    "return Error if utr is missing" in {
+
+      val result =
+        Await.result(sut.getLatestPayments(None, Some(saUtr.value), Some(TaxTypeEnum.appSelfAssessment), journeyId), 0.5.seconds)
+      result.swap.getOrElse("") shouldBe "Unauthorized! UTR or reference is missing from payload/Enrolments"
+    }
+
+    "return Error if utr and reference don't match" in {
+
+      val result =
+        Await.result(sut.getLatestPayments(Some("123456789"), Some(saUtr.value), Some(TaxTypeEnum.appSelfAssessment), journeyId), 0.5.seconds)
+      result.swap.getOrElse("") shouldBe "Unauthorized! Reference in payload doesn't match with logged in UTR"
     }
   }
 

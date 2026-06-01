@@ -30,9 +30,9 @@ object TaxTypeEnum extends Enumeration {
 
     override def reads(json: JsValue): JsResult[TaxTypeEnum.Value] =
       json.as[String] match {
-        //  case "appSimpleAssessment" => JsSuccess(appSimpleAssessment)
-        case "appSelfAssessment" => JsSuccess(appSelfAssessment)
-        case e                   => JsError(s"$e not recognised")
+        case "appSimpleAssessment" => JsSuccess(appSimpleAssessment)
+        case "appSelfAssessment"   => JsSuccess(appSelfAssessment)
+        case e                     => JsError(s"$e not recognised")
       }
   }
 }

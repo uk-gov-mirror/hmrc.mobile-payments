@@ -153,13 +153,20 @@ class LivePaymentController @Inject() (
         withShuttering(shuttered) {
           withErrorWrapper {
             withValidJson[LatestPaymentsRequest] { latestPaymentsRequest =>
-              getSaUTRFromAuth.flatMap { sautrOpt =>
-                paymentsService
-                  .getLatestPayments(sautrOpt.map(_.utr), Some(latestPaymentsRequest.reference), Some(latestPaymentsRequest.taxType), journeyId) map {
-                  case Right(None)                 => NotFound
-                  case Right(payments)             => Ok(Json.toJson(payments))
-                  case Left(s"Unauthorized! $msg") => Unauthorized(s"Unauthorized! $msg")
-                  case Left(e)                     => InternalServerError(e)
+              getNinoFromAuth.flatMap { nino => // checking for auth NINO
+                getSaUTRFromAuth.flatMap { sautrOpt => // checking for auth sautr
+                  paymentsService
+                    .getLatestPayments(nino,
+                                       sautrOpt.map(_.utr),
+                                       Some(latestPaymentsRequest.reference),
+                                       Some(latestPaymentsRequest.taxType),
+                                       journeyId
+                                      ) map {
+                    case Right(None)                 => NotFound
+                    case Right(payments)             => Ok(Json.toJson(payments))
+                    case Left(s"Unauthorized! $msg") => Unauthorized(s"Unauthorized!")
+                    case Left(e)                     => InternalServerError(e)
+                  }
                 }
               }
             }
@@ -178,22 +185,15 @@ class LivePaymentController @Inject() (
             withValidJson[PayByCardRequestGeneric] { payByCardRequest =>
               getNinoFromAuth.flatMap { nino =>
                 getSaUTRFromAuth.flatMap { sautrOpt =>
-                  if (sautrOpt.exists(_.utr == payByCardRequest.reference)) {
-                    paymentsService
-                      .getPayByCardUrl(
-                        payByCardRequest,
-                        nino,
-                        journeyId
-                      )
-                      .map(response => Ok(Json.toJson(response)))
-
-                  } else {
-                    Future.successful(Unauthorized("User is not Authorised to pay by Card"))
-
-                  }
-
+                  paymentsService
+                    .getPayByCardUrl(
+                      payByCardRequest,
+                      nino,
+                      sautrOpt,
+                      journeyId
+                    )
+                    .map(response => Ok(Json.toJson(response)))
                 }
-
               }
             }
           }

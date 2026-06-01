@@ -11,6 +11,7 @@ import uk.gov.hmrc.mobilepayments.domain.dto.response.{LatestPaymentsResponse, P
 import uk.gov.hmrc.mobilepayments.models.openBanking.response.InitiatePaymentResponse
 import utils.BaseISpec
 import play.api.libs.ws.writeableOf_JsValue
+import stubs.P800Stub.stubForP800Response
 
 import java.time.LocalDate
 
@@ -431,11 +432,12 @@ class LivePaymentControllerISpec extends BaseISpec with MobilePaymentsTestData {
   }
 
   "POST /payments/latest-payments" should {
-    "return 200 with the latest payments for the user when taxType is appSelfAssessment" in {
+    "return 200 with the latest payments when taxType = appSelfAssessment" in {
       grantAccess()
       stubForShutteringDisabled
       stubForGetPayments(200, paymentsResponseString())
       getUTRFromAuth("1122334455")
+      getNinoFromAuth()
 
       val request: WSRequest = wsUrl(
         s"/payments/latest-payments?journeyId=$journeyId"
@@ -449,29 +451,63 @@ class LivePaymentControllerISpec extends BaseISpec with MobilePaymentsTestData {
 
     }
 
-//    "return 200 with the latest payments for the user when taxType is appSimpleAssessment" in {
-//      grantAccess()
-//      stubForShutteringDisabled
-//      stubForGetPayments(200, paymentsResponseString(), "other", "22441133")
-//      getUTRFromAuth("22441133")
-//
-//      val request: WSRequest = wsUrl(
-//        s"/payments/latest-payments?journeyId=$journeyId"
-//      ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
-//      val response = await(request.post(Json.parse(latestPaymentsSimpleAssessmentJson)))
-//      response.status shouldBe 200
-//      val parsedResponse = Json.parse(response.body).as[LatestPaymentsResponse]
-//      parsedResponse.payments.size               shouldBe 2
-//      parsedResponse.payments.head.date.toString shouldBe LocalDate.now().toString
-//      parsedResponse.payments.head.amountInPence shouldBe 11100
-//
-//    }
-//
+    "return 401 with the latest payments when taxType = appSelfAssessment and auth utr don't matches req utr" in {
+      grantAccess()
+      stubForShutteringDisabled
+      stubForGetPayments(200, paymentsResponseString())
+      getUTRFromAuth("1234567")
+      getNinoFromAuth()
+
+      val request: WSRequest = wsUrl(
+        s"/payments/latest-payments?journeyId=$journeyId"
+      ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+      val response = await(request.post(Json.parse(latestPaymentsSelfAssessmentJson)))
+      response.status shouldBe 401
+
+    }
+
+    "return 200 with the latest payments when taxType = appSimpleAssessment, auth ref matches request ref" in {
+      grantAccess()
+      stubForShutteringDisabled
+      stubForGetPayments(200, paymentsResponseString(), "other", "22441133")
+      getUTRFromAuth("22441133")
+      getNinoFromAuth()
+      stubForP800Response(nino, taxYear, "22441133", chargeRef2)
+
+      val request: WSRequest = wsUrl(
+        s"/payments/latest-payments?journeyId=$journeyId"
+      ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+      val response = await(request.post(Json.parse(latestPaymentsSimpleAssessmentJson)))
+      response.status shouldBe 200
+      val parsedResponse = Json.parse(response.body).as[LatestPaymentsResponse]
+      parsedResponse.payments.size               shouldBe 2
+      parsedResponse.payments.head.date.toString shouldBe LocalDate.now().toString
+      parsedResponse.payments.head.amountInPence shouldBe 11100
+
+    }
+
+    "return 401 with the latest payments when taxType = appSimpleAssessment and auth ref don;t match request ref" in {
+      grantAccess()
+      stubForShutteringDisabled
+      stubForGetPayments(200, paymentsResponseString(), "other", "22441133")
+      getUTRFromAuth("22441133")
+      getNinoFromAuth()
+      stubForP800Response(nino, taxYear, chargeRef1, chargeRef2)
+
+      val request: WSRequest = wsUrl(
+        s"/payments/latest-payments?journeyId=$journeyId"
+      ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+      val response = await(request.post(Json.parse(latestPaymentsSimpleAssessmentJson)))
+      response.status shouldBe 401
+
+    }
+
     "return 404 when no valid payments returned" in {
       grantAccess()
       stubForShutteringDisabled
       stubForGetPayments(200, paymentsResponseString(LocalDate.now().minusDays(15)))
       getUTRFromAuth("1122334455")
+      getNinoFromAuth()
       val request: WSRequest = wsUrl(
         s"/payments/latest-payments?journeyId=$journeyId"
       ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
@@ -485,6 +521,7 @@ class LivePaymentControllerISpec extends BaseISpec with MobilePaymentsTestData {
       stubForShutteringDisabled
       stubForGetPayments(404)
       getUTRFromAuth("1122334455")
+      getNinoFromAuth()
       val request: WSRequest = wsUrl(
         s"/payments/latest-payments?journeyId=$journeyId"
       ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
@@ -507,6 +544,7 @@ class LivePaymentControllerISpec extends BaseISpec with MobilePaymentsTestData {
       stubForShutteringDisabled
       stubForGetPayments(401)
       getUTRFromAuth("1122334455")
+      getNinoFromAuth()
 
       val request: WSRequest = wsUrl(
         s"/payments/latest-payments?journeyId=$journeyId"
@@ -520,6 +558,7 @@ class LivePaymentControllerISpec extends BaseISpec with MobilePaymentsTestData {
       stubForShutteringDisabled
       stubForGetPayments(500)
       getUTRFromAuth("1122334455")
+      getNinoFromAuth()
 
       val request: WSRequest = wsUrl(
         s"/payments/latest-payments?journeyId=$journeyId"

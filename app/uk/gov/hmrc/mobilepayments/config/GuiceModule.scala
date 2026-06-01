@@ -54,6 +54,10 @@ class GuiceModule(
     bind(classOf[String])
       .annotatedWith(named("payments"))
       .toInstance(servicesConfig.baseUrl("payments"))
+
+    bind(classOf[String])
+      .annotatedWith(named("onlinePaymentsBaseUrl"))
+      .toInstance(servicesConfig.baseUrl("p800-payments"))
   }
 
   private def bindConfigInt(path: String): Unit =

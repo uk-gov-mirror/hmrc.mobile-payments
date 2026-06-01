@@ -59,15 +59,23 @@ class LiveSessionController @Inject() (
           withErrorWrapper {
             withValidJson[CreateSessionRequest] { createPaymentRequest =>
               getSaUTRFromAuth.flatMap { sautrOpt =>
-                val updatedCreatePaymentRequest = createPaymentRequest.copy(saUtr = sautrOpt)
-                openBankingService
-                  .createSession(
-                    updatedCreatePaymentRequest,
-                    journeyId
-                  )
-                  .map(response => Ok(Json.toJson[CreateSessionDataResponse](response)))
+                val updatedCreatePaymentRequest =
+                  if (createPaymentRequest.saUtr.isEmpty) createPaymentRequest.copy(saUtr = sautrOpt)
+                  else
+                    createPaymentRequest // check if request have sautr or not. If present, keep the request else put auth sautr in request behind the scene
+                getNinoFromAuth.flatMap { ninoOpt =>
+                  openBankingService
+                    .createSession(
+                      updatedCreatePaymentRequest,
+                      journeyId,
+                      ninoOpt,
+                      sautrOpt
+                    )
+                    .map(response => Ok(Json.toJson[CreateSessionDataResponse](response)))
+                }
+
               }
-             
+
             }
           }
         }

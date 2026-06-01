@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 HM Revenue & Customs
+ * Copyright 2026 HM Revenue & Customs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,8 +23,8 @@ import uk.gov.hmrc.http.{HeaderCarrier, HttpResponse, UpstreamErrorResponse}
 import uk.gov.hmrc.mobilepayments.MobilePaymentsTestData
 import uk.gov.hmrc.mobilepayments.common.BaseSpec
 import uk.gov.hmrc.mobilepayments.connectors.OpenBankingConnector
-import uk.gov.hmrc.mobilepayments.controllers.errors.MalformedRequestException
-import uk.gov.hmrc.mobilepayments.domain.dto.request.{OriginSpecificData, SelfAssessmentOriginSpecificData, SimpleAssessmentOriginSpecificData}
+import uk.gov.hmrc.mobilepayments.controllers.errors.{FailToMatchTaxIdOnAuth, MalformedRequestException, UtrNotFoundOnAccount}
+import uk.gov.hmrc.mobilepayments.domain.dto.request.{CreateSessionRequest, OriginSpecificData, SelfAssessmentOriginSpecificData, SimpleAssessmentOriginSpecificData, TaxTypeEnum}
 import uk.gov.hmrc.mobilepayments.domain.dto.response.OpenBankingPaymentStatusResponse
 import uk.gov.hmrc.mobilepayments.domain.types.JourneyId
 import uk.gov.hmrc.mobilepayments.domain.Bank
@@ -33,11 +33,12 @@ import uk.gov.hmrc.mobilepayments.models.openBanking.{OriginSpecificSessionData,
 
 import java.time.LocalDate
 import scala.concurrent.duration.*
-import scala.concurrent.{Await, Future}
+import scala.concurrent.{Await, ExecutionContext, Future}
 
 class OpenBankingServiceSpec extends BaseSpec with MobilePaymentsTestData {
 
   private val mockConnector: OpenBankingConnector = mock[OpenBankingConnector]
+  private val mockP800Service: P800Service = mock[P800Service]
   private val amount: BigDecimal = 102.85
   private val amountInPence: BigDecimal = (amount * 100).longValue
   private val saUtr: SaUtr = SaUtr("CS700100A")
@@ -48,10 +49,10 @@ class OpenBankingServiceSpec extends BaseSpec with MobilePaymentsTestData {
   private val selfAssessmentSpecificData: SelfAssessmentOriginSpecificData = SelfAssessmentOriginSpecificData(saUtr)
 
   private val simpleAssessmentSpecificData: SimpleAssessmentOriginSpecificData = SimpleAssessmentOriginSpecificData(
-    saUtr.value
+    chargeRef1
   )
 
-  private val sut = new OpenBankingService(mockConnector, returnUrl)
+  private val sut = new OpenBankingService(mockConnector, mockP800Service, returnUrl)
 
   "when getBanks invoked and connector returns success with banks then" should {
     "return banks" in {
@@ -72,67 +73,216 @@ class OpenBankingServiceSpec extends BaseSpec with MobilePaymentsTestData {
     }
   }
 
-  "when createSession invoked  with saUtr and amount and connector succeeds then" should {
-    "return session data response" in {
-      mockCreateSession(Future successful createSessionDataResponse)
+  "Create session method" when {
 
-      val result = Await.result(sut.createSession(createSessionRequest, journeyId), 0.5.seconds)
-      result.sessionDataId.value shouldEqual "51cc67d6-21da-11ec-9621-0242ac130002"
-    }
-  }
+    val createSessionRequest = CreateSessionRequest(amount        = Some(100),
+                                                    saUtr         = Some(saUtr),
+                                                    amountInPence = Some(amountInPence),
+                                                    reference     = Some(saUtr.utr),
+                                                    taxType       = Some(TaxTypeEnum.appSelfAssessment)
+                                                   )
 
-  "when createSession invoked with reference, amountInPence and taxType is set to simpleAssessment and connector succeeds then" should {
-    "return session data response" in {
-      // mockCreateSessionSimpleAssessment(Future successful createSessionDataResponse)
-      intercept[java.util.NoSuchElementException] {
-        Await.result(sut.createSession(createSessionNewSIRequest, journeyId), 0.5.seconds)
+    "taxType == appSelfAssessment" when {
+
+      "amount = None, payload reference matches auth UTR and request sautr" should {
+
+        "create session" in {
+          mockCreateSession(Future successful createSessionDataResponse)
+          val result =
+            Await.result(sut.createSession(createSessionRequest.copy(amount = None, saUtr = Some(saUtr)), journeyId, sautrOpt = Some(saUtr)),
+                         0.5.seconds
+                        )
+          result.sessionDataId.value shouldEqual "51cc67d6-21da-11ec-9621-0242ac130002"
+        }
       }
 
-//      val result = Await.result(sut.createSession(createSessionNewSIRequest, journeyId), 0.5.seconds)
-//      result.sessionDataId.value shouldEqual "51cc67d6-21da-11ec-9621-0242ac130002"
-    }
-  }
+      "amount = None, payload reference matches auth UTR but request sautr is diff" should {
 
-  "when createSession invoked with reference, amountInPence and taxType is set to selfAssessment and connector succeeds then" should {
-    "return session data response" in {
-      mockCreateSessionSelfAssessment(Future successful createSessionDataResponse)
+        "Throw exception: FailToMatchTaxIdOnAuth" in {
 
-      val result = Await.result(sut.createSession(createSessionNewSARequest, journeyId), 0.5.seconds)
-      result.sessionDataId.value shouldEqual "51cc67d6-21da-11ec-9621-0242ac130002"
-    }
-  }
+          intercept[FailToMatchTaxIdOnAuth] {
+            Await.result(
+              sut.createSession(createSessionRequest.copy(amount = None, saUtr = Some(SaUtr("123456"))), journeyId, sautrOpt = Some(saUtr)),
+              0.5.seconds
+            )
+          }
+        }
+      }
 
-  "Calling createSession with amount, saUtr and taxType set to appSelfAssessment" should {
-    "return MalformedRequestException" in {
-      intercept[MalformedRequestException] {
-        Await.result(sut.createSession(createSessionIncorrectFieldsSA, journeyId), 0.5.seconds)
+      "amount = None, auth Utr is missing, request sautr = request reference" should {
+
+        "Throw exception : UtrNotFoundOnAccount" in {
+
+          intercept[UtrNotFoundOnAccount] {
+            Await.result(
+              sut.createSession(createSessionRequest.copy(amount = None, saUtr = Some(saUtr)), journeyId, sautrOpt = None),
+              0.5.seconds
+            )
+          }
+        }
+      }
+
+      "amount = None, auth utr equals reference and requested utr, amount in pence missing" should {
+
+        "Throw exception : MalformedRequestException" in {
+
+          intercept[MalformedRequestException] {
+            Await.result(
+              sut.createSession(createSessionRequest.copy(amount = None, amountInPence = None, saUtr = Some(saUtr)),
+                                journeyId,
+                                sautrOpt = Some(saUtr)
+                               ),
+              0.5.seconds
+            )
+          }
+        }
       }
     }
-  }
 
-//  "Calling createSession with amount, saUtr and taxType set to appSimpleAssessment" should {
-//    "return MalformedRequestException" in {
-//      intercept[MalformedRequestException] {
-//        Await.result(sut.createSession(createSessionIncorrectFieldsSI, journeyId), 0.5.seconds)
-//      }
-//    }
-//  }
+    "taxType == appSimpleAssessment" when {
 
-  "Calling createSession with amountInPence, reference but no taxType" should {
-    "return MalformedRequestException" in {
-      intercept[MalformedRequestException] {
-        Await.result(sut.createSession(createSessionIncorrectFieldsOld, journeyId), 0.5.seconds)
+      "amount = None, payload reference matches auth reference" should {
+
+        "create session" in {
+          mockGetReferenceList(Future.successful(chargeRefList))
+          mockCreateSessionSimpleAssessment(Future successful createSessionDataResponse)
+          val result =
+            Await.result(
+              sut.createSession(
+                createSessionRequest.copy(amount = None, saUtr = None, taxType = Some(TaxTypeEnum.appSimpleAssessment), reference = Some(chargeRef1)),
+                journeyId,
+                sautrOpt = None,
+                ninoOpt  = Some(saUtr.utr)
+              ),
+              0.5.seconds
+            )
+          result.sessionDataId.value shouldEqual "51cc67d6-21da-11ec-9621-0242ac130002"
+        }
+      }
+
+      "amount = None, payload reference don't match auth reference" should {
+
+        "throw exception: FailToMatchTaxIdOnAuth" in {
+          mockGetReferenceList(Future.successful(chargeRefList))
+          intercept[FailToMatchTaxIdOnAuth] {
+            Await.result(
+              sut.createSession(
+                createSessionRequest.copy(amount = None, saUtr = None, taxType = Some(TaxTypeEnum.appSimpleAssessment), reference = Some("56765")),
+                journeyId,
+                sautrOpt = None,
+                ninoOpt  = Some(saUtr.utr)
+              ),
+              0.5.seconds
+            )
+          }
+        }
+      }
+
+      "amount in pence = None, payload reference  matches auth reference" should {
+
+        "throw exception: MalformedRequestException" in {
+          intercept[MalformedRequestException] {
+            Await.result(
+              sut.createSession(
+                createSessionRequest.copy(amountInPence = None,
+                                          saUtr         = None,
+                                          taxType       = Some(TaxTypeEnum.appSimpleAssessment),
+                                          reference     = Some(chargeRef1)
+                                         ),
+                journeyId,
+                sautrOpt = None,
+                ninoOpt  = Some(saUtr.utr)
+              ),
+              0.5.seconds
+            )
+          }
+        }
+      }
+
+      "amount in pence is present , payload reference is None" should {
+
+        "throw exception: MalformedRequestException" in {
+          intercept[MalformedRequestException] {
+            Await.result(
+              sut.createSession(
+                createSessionRequest.copy(
+                  saUtr     = None,
+                  taxType   = Some(TaxTypeEnum.appSimpleAssessment),
+                  reference = None // set reference to None
+                ),
+                journeyId,
+                sautrOpt = None,
+                ninoOpt  = Some(saUtr.utr)
+              ),
+              0.5.seconds
+            )
+          }
+        }
       }
     }
-  }
 
-  "when createSession invoked and connector fails then" should {
-    "return an error" in {
-      mockCreateSession(Future failed UpstreamErrorResponse("Error", 400, 400))
+    "taxType == Blank" when {
+      "Only amount and sautr are present && request sautr matches auth sautr" should {
 
-      intercept[UpstreamErrorResponse] {
-        Await.result(sut.createSession(createSessionRequest, journeyId), 0.5.seconds)
+        "Create a session" in {
+          mockCreateSession(Future successful createSessionDataResponse)
+          val result = Await.result(
+            sut.createSession(createSessionRequest.copy(amount = Some(102.85), saUtr = Some(saUtr), taxType = None),
+                              journeyId,
+                              sautrOpt = Some(saUtr)
+                             ),
+            0.5.seconds
+          )
+          result.sessionDataId.value shouldEqual "51cc67d6-21da-11ec-9621-0242ac130002"
+        }
+
       }
+
+      "Only amount and sautr are present && request sautr don't matches auth sautr" should {
+
+        "Throw exception : FailToMatchTaxIdOnAuth" in {
+
+          intercept[FailToMatchTaxIdOnAuth] {
+            Await.result(
+              sut.createSession(createSessionRequest.copy(amount = Some(102.85), saUtr = Some(SaUtr("456789")), taxType = None),
+                                journeyId,
+                                sautrOpt = Some(saUtr)
+                               ),
+              0.5.seconds
+            )
+          }
+        }
+
+      }
+
+      "Amount is missing and sautr is  present && request sautr  matches auth sautr" should {
+
+        "Throw exception : MalformedRequestException" in {
+
+          intercept[MalformedRequestException] {
+            Await.result(
+              sut.createSession(createSessionRequest.copy(amount = None, saUtr = Some(saUtr), taxType = None), journeyId, sautrOpt = Some(saUtr)),
+              0.5.seconds
+            )
+          }
+        }
+
+      }
+
+      "Amount is present and sautr is  missing " should {
+
+        "Throw exception : MalformedRequestException" in {
+
+          intercept[MalformedRequestException] {
+            Await.result(
+              sut.createSession(createSessionRequest.copy(amount = Some(102.85), saUtr = None, taxType = None), journeyId, sautrOpt = Some(saUtr)),
+              0.5.seconds
+            )
+          }
+        }
+
+      }
+
     }
   }
 
@@ -311,6 +461,13 @@ class OpenBankingServiceSpec extends BaseSpec with MobilePaymentsTestData {
       .createSession(_: BigDecimal, _: OriginSpecificData, _: JourneyId)(_: HeaderCarrier))
       .expects(amountInPence, selfAssessmentSpecificData, journeyId, hc)
       .returning(future)
+
+  private def mockGetReferenceList(response: Future[List[String]]) = {
+    (mockP800Service
+      .getChargeRefernceList(_: Option[String], _: Int)(_: ExecutionContext, _: HeaderCarrier))
+      .expects(*, *, *, *)
+      .returning(response)
+  }
 
   private def mockCreateSessionSimpleAssessment(future: Future[CreateSessionDataResponse]): Unit =
     (mockConnector

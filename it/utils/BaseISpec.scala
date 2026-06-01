@@ -24,6 +24,7 @@ import play.api.Application
 import play.api.inject.guice.GuiceApplicationBuilder
 import play.api.libs.ws.WSClient
 import play.api.test.{DefaultAwaitTimeout, FutureAwaits}
+import uk.gov.hmrc.time.TaxYear
 
 abstract class BaseISpec
     extends AnyWordSpecLike
@@ -41,6 +42,7 @@ abstract class BaseISpec
   protected val authorisationJsonHeader: (String, String) = "AUTHORIZATION" -> "Bearer 123"
   protected val sessionIdHeader: (String, String) = "X-Session-ID"          -> "13345a9d-0958-4931-ae83-5a36e4ccd979"
   val journeyId: String = "27085215-69a4-4027-8f72-b04b10ec16b0"
+  val taxYear = TaxYear.current.previous.startYear
 
   def config: Map[String, Any] =
     Map[String, Any](
@@ -48,7 +50,8 @@ abstract class BaseISpec
       "microservice.services.auth.port"              -> wireMockPort,
       "microservice.services.open-banking.port"      -> wireMockPort,
       "microservice.services.payments.port"          -> wireMockPort,
-      "microservice.services.mobile-shuttering.port" -> wireMockPort
+      "microservice.services.mobile-shuttering.port" -> wireMockPort,
+      "microservice.services.p800-payments.port"     -> wireMockPort
     )
 
   protected def appBuilder: GuiceApplicationBuilder = new GuiceApplicationBuilder().configure(config)

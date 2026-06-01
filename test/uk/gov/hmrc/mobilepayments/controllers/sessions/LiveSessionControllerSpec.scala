@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 HM Revenue & Customs
+ * Copyright 2026 HM Revenue & Customs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import play.api.libs.json.Json
 import play.api.test.Helpers.*
 import play.api.test.{FakeRequest, Helpers}
 import uk.gov.hmrc.auth.core.{AuthConnector, ConfidenceLevel}
+import uk.gov.hmrc.domain.SaUtr
 import uk.gov.hmrc.http.{HeaderCarrier, UpstreamErrorResponse}
 import uk.gov.hmrc.mobilepayments.MobilePaymentsTestData
 import uk.gov.hmrc.mobilepayments.common.BaseSpec
@@ -57,6 +58,7 @@ class LiveSessionControllerSpec extends BaseSpec with AuthorisationStub with Mob
       stubAuthorisationGrantAccess(authorisedResponse)
       shutteringDisabled()
       stubGetUTRFromAuth(utrAndEnrolmentResponse)
+      stubGetNinoFromAuth(nino)
       mockCreateSession(Future successful createSessionDataResponse)
 
       val request = FakeRequest("POST", "/sessions")
@@ -70,29 +72,31 @@ class LiveSessionControllerSpec extends BaseSpec with AuthorisationStub with Mob
     }
   }
 
-  // "Calling create session with taxType as SimpleAssessment, reference and amountInPence" should {
-//    "return 200" in {
-//      stubAuthorisationGrantAccess(authorisedResponse)
-//      shutteringDisabled()
-//      stubGetUTRFromAuth(utrAndEnrolmentResponse)
-//      mockCreateSession(Future successful createSessionDataResponse)
-//
-//      val request = FakeRequest("POST", "/sessions")
-//        .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
-//        .withBody(Json.obj("amountInPence" -> 1234, "reference" -> "12212321", "taxType" -> "appSimpleAssessment"))
-//
-//      val result = sut.createSession(journeyId)(request)
-//      status(result) shouldBe 200
-//      val response = contentAsJson(result).as[CreateSessionDataResponse]
-//      response.sessionDataId.value shouldEqual sessionDataId
-//    }
-  // }
+  "Calling create session with taxType as SimpleAssessment, reference and amountInPence" should {
+    "return 200" in {
+      stubAuthorisationGrantAccess(authorisedResponse)
+      shutteringDisabled()
+      stubGetUTRFromAuth(utrAndEnrolmentResponse)
+      stubGetNinoFromAuth(nino)
+      mockCreateSession(Future successful createSessionDataResponse)
+
+      val request = FakeRequest("POST", "/sessions")
+        .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
+        .withBody(Json.obj("amountInPence" -> 1234, "reference" -> "12212321", "taxType" -> "appSimpleAssessment"))
+
+      val result = sut.createSession(journeyId)(request)
+      status(result) shouldBe 200
+      val response = contentAsJson(result).as[CreateSessionDataResponse]
+      response.sessionDataId.value shouldEqual sessionDataId
+    }
+  }
 
   "Calling create session with taxType as SelfAssessment, reference and amountInPence" should {
     "return 200" in {
       stubAuthorisationGrantAccess(authorisedResponse)
       shutteringDisabled()
       stubGetUTRFromAuth(utrAndEnrolmentResponse)
+      stubGetNinoFromAuth(nino)
       mockCreateSession(Future successful createSessionDataResponse)
 
       val request = FakeRequest("POST", "/sessions")
@@ -111,6 +115,7 @@ class LiveSessionControllerSpec extends BaseSpec with AuthorisationStub with Mob
       stubAuthorisationGrantAccess(authorisedResponse)
       shutteringDisabled()
       stubGetUTRFromAuth(utrAndEnrolmentResponse)
+      stubGetNinoFromAuth(nino)
       mockCreateSession(Future failed UpstreamErrorResponse("Error", 400, 400))
       val request = FakeRequest("POST", "/sessions")
         .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
@@ -126,6 +131,7 @@ class LiveSessionControllerSpec extends BaseSpec with AuthorisationStub with Mob
       stubAuthorisationGrantAccess(authorisedResponse)
       shutteringDisabled()
       stubGetUTRFromAuth(utrAndEnrolmentResponse)
+      stubGetNinoFromAuth(nino)
       mockCreateSession(Future failed UpstreamErrorResponse("Error", 401, 401))
 
       val request = FakeRequest("POST", "/sessions")
@@ -155,6 +161,7 @@ class LiveSessionControllerSpec extends BaseSpec with AuthorisationStub with Mob
       stubAuthorisationGrantAccess(authorisedResponse)
       shutteringDisabled()
       stubGetUTRFromAuth(utrAndEnrolmentResponse)
+      stubGetNinoFromAuth(nino)
       mockCreateSession(Future failed UpstreamErrorResponse("Error", 502, 502))
 
       val request = FakeRequest("POST", "/sessions")
@@ -403,8 +410,8 @@ class LiveSessionControllerSpec extends BaseSpec with AuthorisationStub with Mob
 
   private def mockCreateSession(future: Future[CreateSessionDataResponse]) =
     (mockOpenBankingService
-      .createSession(_: CreateSessionRequest, _: JourneyId)(_: HeaderCarrier, _: ExecutionContext))
-      .expects(*, *, *, *)
+      .createSession(_: CreateSessionRequest, _: JourneyId, _: Option[String], _: Option[SaUtr])(_: HeaderCarrier, _: ExecutionContext))
+      .expects(*, *, *, *, *, *)
       .returning(future)
 
   private def mockGetSession(future: Future[SessionDataResponse]) =

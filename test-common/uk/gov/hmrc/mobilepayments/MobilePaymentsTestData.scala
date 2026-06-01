@@ -22,11 +22,16 @@ import uk.gov.hmrc.mobilepayments.domain.dto.response.*
 import uk.gov.hmrc.mobilepayments.domain.{Bank, BankGroupData, PaymentRecordListFromApi, Shuttering}
 import uk.gov.hmrc.mobilepayments.models.openBanking.{OriginSpecificSessionData, SessionData}
 import uk.gov.hmrc.mobilepayments.models.openBanking.response.{CreateSessionDataResponse, InitiatePaymentResponse}
+import uk.gov.hmrc.time.TaxYear
 
 import java.time.LocalDate
 import scala.io.Source
 
 trait MobilePaymentsTestData {
+  val nino: Option[String] = Some("CS700100A")
+  val chargeRef1: String = "XC123456789"
+  val chargeRef2 = "XC987654321"
+  val chargeRefList = List(chargeRef1, chargeRef2)
 
   lazy val banksResponse: List[Bank] = Json.fromJson[List[Bank]](js("banks-response")).get
 
@@ -101,8 +106,22 @@ trait MobilePaymentsTestData {
   lazy val payByCardResponse: PayByCardResponse =
     Json.fromJson[PayByCardResponse](js("pay-by-card-response")).get
 
+  val paymentDataResponseTestJson: String =
+    Source.fromFile("test-common/uk/gov/hmrc/mobilepayments/resources/test-p800-response-full.json").mkString
+
   def paymentsResponseString(date: LocalDate = LocalDate.now()): String =
     json("payments-response").replace("<DATE>", date.toString).replace("<DATE2>", date.minusDays(10).toString)
+
+  def getTestJson(
+    path: String,
+    nino: String
+  ): JsValue =
+    Json.parse(updateJson(path.replace("<NINO>", nino)))
+
+  private def updateJson(response: String): String = {
+    val regex = "\"<CY-(\\d)>\"".r
+    regex.replaceAllIn(response, int => (TaxYear.current.startYear - int.group(1).toInt).toString)
+  }
 
   def paymentsResponse(date: LocalDate = LocalDate.now()): PaymentRecordListFromApi =
     Json

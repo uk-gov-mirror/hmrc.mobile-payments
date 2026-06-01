@@ -124,10 +124,11 @@ trait AccessControl extends HeaderValidator with Authorisation {
           }
 
         (sautrOpt, enrolmentSautr) match {
-          case (Some(utr1), Some(enrolmentUtr)) => if (enrolmentUtr == utr1) Future.successful(enrolmentSautr.map(SaUtr(_))) else Future.successful(None)
-          case (None, enrolmentUtrOpt)          => Future.successful(enrolmentSautr.map(SaUtr(_)))
-          case (sautrOpt, None)                 => Future.successful(sautrOpt.map(SaUtr(_)))
-          case (None, None)                     => Future.successful(None)
+          case (Some(utr1), Some(enrolmentUtr)) =>
+            if (enrolmentUtr == utr1) Future.successful(enrolmentSautr.map(SaUtr(_))) else Future.successful(None)
+          case (None, enrolmentUtrOpt) => Future.successful(enrolmentSautr.map(SaUtr(_)))
+          case (sautrOpt, None)        => Future.successful(sautrOpt.map(SaUtr(_)))
+          case _                       => Future.successful(None)
 
         }
       }

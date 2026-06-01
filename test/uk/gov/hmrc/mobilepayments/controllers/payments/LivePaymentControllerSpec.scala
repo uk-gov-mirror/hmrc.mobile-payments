@@ -21,6 +21,7 @@ import play.api.libs.json.Json
 import play.api.test.Helpers.*
 import play.api.test.{FakeRequest, Helpers}
 import uk.gov.hmrc.auth.core.{AuthConnector, ConfidenceLevel}
+import uk.gov.hmrc.domain.SaUtr
 import uk.gov.hmrc.http.{HeaderCarrier, UpstreamErrorResponse}
 import uk.gov.hmrc.mobilepayments.MobilePaymentsTestData
 import uk.gov.hmrc.mobilepayments.common.BaseSpec
@@ -330,71 +331,145 @@ class LivePaymentControllerSpec extends BaseSpec with AuthorisationStub with Mob
     }
   }
 
-  "when get latest payments invoked and service returns success then" should {
-    "return 200 and latest payments" in {
-      stubAuthorisationGrantAccess(authorisedResponse)
-      shutteringDisabled()
-      stubGetUTRFromAuth(utrAndEnrolmentResponse)
-      mockGetLatestPayments(Future successful Right(Some(latestPaymentsResponse)))
+  "latestPayments" when {
 
-      val request = FakeRequest("POST", s"/payments/latest-payments")
-        .withHeaders(acceptJsonHeader, contentHeader)
-        .withBody(Json.obj("taxType" -> "appSelfAssessment", "reference" -> utr))
+    "taxType = appSelfAssessment and reference matches the UTR" should {
 
-      val result = sut.latestPayments(journeyId)(request)
-      status(result) shouldBe 200
-      val response = contentAsJson(result).as[LatestPaymentsResponse]
-      response.payments.size               shouldBe 2
-      response.payments.head.amountInPence shouldBe 11100
-      response.payments.head.date.toString shouldBe "2022-05-07"
+      "return latest Payment" in {
+        stubAuthorisationGrantAccess(authorisedResponse)
+        shutteringDisabled()
+        stubGetNinoFromAuth(Some(nino))
+        stubGetUTRFromAuth(utrAndEnrolmentResponse)
+        mockGetLatestPayments(Future successful Right(Some(latestPaymentsResponse)))
+
+        val request = FakeRequest("POST", s"/payments/latest-payments")
+          .withHeaders(acceptJsonHeader, contentHeader)
+          .withBody(Json.obj("taxType" -> "appSelfAssessment", "reference" -> utr))
+
+        val result = sut.latestPayments(journeyId)(request)
+        status(result) shouldBe 200
+        val response = contentAsJson(result).as[LatestPaymentsResponse]
+        response.payments.size               shouldBe 2
+        response.payments.head.amountInPence shouldBe 11100
+        response.payments.head.date.toString shouldBe "2022-05-07"
+      }
     }
-  }
 
-  "when get latest payments invoked and service returns None" should {
-    "return 404 Not Found" in {
-      stubAuthorisationGrantAccess(authorisedResponse)
-      shutteringDisabled()
-      stubGetUTRFromAuth(utrAndEnrolmentResponse)
-      mockGetLatestPayments(Future successful Right(None))
+    "taxType = appSelfAssessment and reference don't matches the UTR" should {
 
-      val request = FakeRequest("POST", s"/payments/latest-payments")
-        .withHeaders(acceptJsonHeader, contentHeader)
-        .withBody(Json.obj("taxType" -> "appSelfAssessment", "reference" -> utr))
+      "return 401" in {
+        stubAuthorisationGrantAccess(authorisedResponse)
+        shutteringDisabled()
+        stubGetNinoFromAuth(Some(nino))
+        stubGetUTRFromAuth(utrAndEnrolmentResponse)
+        mockGetLatestPayments(Future successful Left("Unauthorized! Reference in payload doesn't match with logged in UTR"))
 
-      val result = sut.latestPayments(journeyId)(request)
-      status(result) shouldBe 404
+        val request = FakeRequest("POST", s"/payments/latest-payments")
+          .withHeaders(acceptJsonHeader, contentHeader)
+          .withBody(Json.obj("taxType" -> "appSelfAssessment", "reference" -> "1234567"))
+
+        val result = sut.latestPayments(journeyId)(request)
+        status(result) shouldBe 401
+      }
     }
-  }
 
-  "when get latest payments invoked and service returns Error String" should {
-    "return 500 Internal Server Error" in {
-      stubAuthorisationGrantAccess(authorisedResponse)
-      shutteringDisabled()
-      stubGetUTRFromAuth(utrAndEnrolmentResponse)
-      mockGetLatestPayments(Future successful Left("Unknown response"))
+    "taxType = appSelfAssessment and reference matches the UTR and payment service returns not found" should {
 
-      val request = FakeRequest("POST", s"/payments/latest-payments")
-        .withHeaders(acceptJsonHeader, contentHeader)
-        .withBody(Json.obj("taxType" -> "appSelfAssessment", "reference" -> utr))
+      "return 404" in {
+        stubAuthorisationGrantAccess(authorisedResponse)
+        shutteringDisabled()
+        stubGetNinoFromAuth(Some(nino))
+        stubGetUTRFromAuth(utrAndEnrolmentResponse)
+        mockGetLatestPayments(Future successful Right(None))
 
-      val result = sut.latestPayments(journeyId)(request)
-      status(result) shouldBe 500
+        val request = FakeRequest("POST", s"/payments/latest-payments")
+          .withHeaders(acceptJsonHeader, contentHeader)
+          .withBody(Json.obj("taxType" -> "appSelfAssessment", "reference" -> utr))
+
+        val result = sut.latestPayments(journeyId)(request)
+        status(result) shouldBe 404
+      }
     }
-    // TODO remove this test case once we have changes for simple assessment
-    "return 400 Bad Request in case of simple assessment" in {
-      stubAuthorisationGrantAccess(authorisedResponse)
-      shutteringDisabled()
 
-      val request = FakeRequest("POST", s"/payments/latest-payments")
-        .withHeaders(acceptJsonHeader, contentHeader)
-        .withBody(Json.obj("taxType" -> "appSimpleAssessment", "reference" -> utr))
+    "taxType = appSelfAssessment and reference matches the UTR and payment service returns internal server error" should {
 
-      val result = sut.latestPayments(journeyId)(request)
-      status(result) shouldBe 400
+      "return 500" in {
+        stubAuthorisationGrantAccess(authorisedResponse)
+        shutteringDisabled()
+        stubGetNinoFromAuth(Some(nino))
+        stubGetUTRFromAuth(utrAndEnrolmentResponse)
+        mockGetLatestPayments(Future successful Left("Unknown response"))
+
+        val request = FakeRequest("POST", s"/payments/latest-payments")
+          .withHeaders(acceptJsonHeader, contentHeader)
+          .withBody(Json.obj("taxType" -> "appSelfAssessment", "reference" -> utr))
+
+        val result = sut.latestPayments(journeyId)(request)
+        status(result) shouldBe 500
+      }
+    }
+
+    "taxType = appSimpleAssessment and reference matches the Auth reference" should {
+
+      "return latest Payment" in {
+        stubAuthorisationGrantAccess(authorisedResponse)
+        shutteringDisabled()
+        stubGetNinoFromAuth(Some(nino))
+        stubGetUTRFromAuth(utrAndEnrolmentResponse)
+        mockGetLatestPayments(Future successful Right(Some(latestPaymentsResponse)))
+
+        val request = FakeRequest("POST", s"/payments/latest-payments")
+          .withHeaders(acceptJsonHeader, contentHeader)
+          .withBody(Json.obj("taxType" -> "appSimpleAssessment", "reference" -> chargeRef1))
+
+        val result = sut.latestPayments(journeyId)(request)
+        status(result) shouldBe 200
+        val response = contentAsJson(result).as[LatestPaymentsResponse]
+        response.payments.size               shouldBe 2
+        response.payments.head.amountInPence shouldBe 11100
+        response.payments.head.date.toString shouldBe "2022-05-07"
+      }
+    }
+
+    "taxType = appSimpleAssessment and reference don't matches the Auth reference" should {
+
+      "return 401" in {
+        stubAuthorisationGrantAccess(authorisedResponse)
+        shutteringDisabled()
+        stubGetNinoFromAuth(Some(nino))
+        stubGetUTRFromAuth(utrAndEnrolmentResponse)
+        mockGetLatestPayments(Future successful Left("Unauthorized! Reference in payload doesn't match with logged in Reference"))
+
+        val request = FakeRequest("POST", s"/payments/latest-payments")
+          .withHeaders(acceptJsonHeader, contentHeader)
+          .withBody(Json.obj("taxType" -> "appSimpleAssessment", "reference" -> "1234567"))
+
+        val result = sut.latestPayments(journeyId)(request)
+        status(result) shouldBe 401
+      }
     }
   }
 
   "when get pay by card url invoked with self assessment and service returns success then" should {
+    "return 200" in {
+      stubAuthorisationGrantAccess(authorisedResponse)
+      shutteringDisabled()
+      stubGetNinoFromAuth(Some(nino))
+      stubGetUTRFromAuth(utrAndEnrolmentResponse)
+      mockPayByCardUrl(Future successful payByCardResponse)
+
+      val request = FakeRequest("POST", s"/payments/pay-by-card")
+        .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
+        .withBody(Json.obj("amountInPence" -> 1234, "taxType" -> "appSelfAssessment", "reference" -> utr))
+
+      val result = sut.getPayByCardURL(journeyId)(request)
+      status(result) shouldBe 200
+      val response = contentAsJson(result).as[PayByCardResponse]
+      response.payByCardUrl shouldBe "/pay/choose-a-way-to-pay?traceId=12345678"
+    }
+  }
+
+  "when get pay by card url invoked with simple assessment and service returns success then" should {
     "return 200" in {
       stubAuthorisationGrantAccess(authorisedResponse)
       shutteringDisabled()
@@ -559,17 +634,17 @@ class LivePaymentControllerSpec extends BaseSpec with AuthorisationStub with Mob
 
   private def mockGetLatestPayments(future: Future[Either[String, Option[LatestPaymentsResponse]]]) =
     (mockPaymentsService
-      .getLatestPayments(_: Option[String], _: Option[String], _: Option[TaxTypeEnum.Value], _: JourneyId)(
+      .getLatestPayments(_: Option[String], _: Option[String], _: Option[String], _: Option[TaxTypeEnum.Value], _: JourneyId)(
         _: ExecutionContext,
         _: HeaderCarrier
       ))
-      .expects(*, *, *, *, *, *)
+      .expects(*, *, *, *, *, *, *)
       .returning(future)
 
   private def mockPayByCardUrl(future: Future[PayByCardResponse]): Unit =
     (mockPaymentsService
-      .getPayByCardUrl(_: PayByCardRequestGeneric, _: Option[String], _: JourneyId)(_: ExecutionContext, _: HeaderCarrier))
-      .expects(*, *, journeyId, *, *)
+      .getPayByCardUrl(_: PayByCardRequestGeneric, _: Option[String], _: Option[SaUtr], _: JourneyId)(_: ExecutionContext, _: HeaderCarrier))
+      .expects(*, *, *, journeyId, *, *)
       .returning(future)
 
 }

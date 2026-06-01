@@ -35,7 +35,7 @@ class GrantAccessException(message: String) extends HttpException(message, 401)
 
 class AccountWithLowCL extends GrantAccessException("Unauthorised! Account with low CL!")
 
-class FailToMatchTaxIdOnAuth extends GrantAccessException("Unauthorised! Failure to match URL/Request UTR against Auth UTR")
+class FailToMatchTaxIdOnAuth extends GrantAccessException("Unauthorised! Failure to match  UTR/Reference against logged in user's UTR/reference")
 
 class UtrNotFoundOnAccount extends GrantAccessException("Unauthorised! UTR not found on account!")
 
@@ -73,12 +73,16 @@ trait ErrorHandling {
         Status(ErrorNotFound.httpStatusCode)
 
       case ex: MalformedRequestException =>
-        logger.warn("Malformed JSON")
-        Status(ErrorMalformedRequest.httpStatusCode)
+        logger.warn(s"Malformed JSON  ${ex.getMessage}")
+        Status(ErrorMalformedRequest.httpStatusCode)(ex.getMessage)
 
       case ex: FailToMatchTaxIdOnAuth =>
-        logger.warn("Unauthorised! Failure to match URL/Request UTR against Auth UTR")
-        Status(ErrorUnauthorizedUpstream.httpStatusCode)
+        logger.warn(s"${ex.getMessage}")
+        Status(ErrorUnauthorizedUpstream.httpStatusCode)(ex.getMessage)
+
+      case ex: UtrNotFoundOnAccount =>
+        logger.warn(s"${ex.getMessage}")
+        Status(ErrorUnauthorizedUpstream.httpStatusCode)(ex.getMessage)
 
       case e: Exception =>
         logger.warn(s"Native Error - $app Internal server error 2: ${e.getMessage}", e)

@@ -6,7 +6,7 @@ val appName = "mobile-payments"
 lazy val scoverageSettings = {
   Seq(
     ScoverageKeys.coverageExcludedFiles := "<empty>;.*definition.*;prod.*;testOnlyDoNotUseInAppConf.*;app.*;.*BuildInfo.*;.*Routes.*;.*javascript.*;.*Reverse.*;.*Hooks.*;.*AppConfig.*;.*AppConfig.*;.*mobilepayments.models.*;.*mobilepayments.config.*;.*mobilepayments.domain.*;.*mobilepayments.controllers.api.*",
-    coverageMinimumStmtTotal := 90, // Need to increase this later
+    coverageMinimumStmtTotal := 92,
     ScoverageKeys.coverageFailOnMinimum := true,
     ScoverageKeys.coverageHighlighting := true
   )

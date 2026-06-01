@@ -20,7 +20,7 @@ import com.google.inject.{Inject, Singleton}
 import uk.gov.hmrc.domain.SaUtr
 import uk.gov.hmrc.http.{BadRequestException, HeaderCarrier}
 import uk.gov.hmrc.mobilepayments.connectors.OpenBankingConnector
-import uk.gov.hmrc.mobilepayments.controllers.errors.{FailToMatchTaxIdOnAuth, MalformedRequestException}
+import uk.gov.hmrc.mobilepayments.controllers.errors.{FailToMatchTaxIdOnAuth, MalformedRequestException, UtrNotFoundOnAccount}
 import uk.gov.hmrc.mobilepayments.domain.dto.request.{CreateSessionRequest, SelfAssessmentOriginSpecificData, SimpleAssessmentOriginSpecificData, TaxTypeEnum}
 import uk.gov.hmrc.mobilepayments.domain.dto.response.*
 import uk.gov.hmrc.mobilepayments.domain.dto.response.Origins.*
@@ -28,13 +28,18 @@ import uk.gov.hmrc.mobilepayments.domain.types.JourneyId
 import uk.gov.hmrc.mobilepayments.domain.{Bank, BankGroupData}
 import uk.gov.hmrc.mobilepayments.models.openBanking.*
 import uk.gov.hmrc.mobilepayments.models.openBanking.response.{CreateSessionDataResponse, InitiatePaymentResponse}
+import uk.gov.hmrc.time.TaxYear
 
 import java.time.LocalDate
 import javax.inject.Named
 import scala.concurrent.{ExecutionContext, Future}
 
 @Singleton
-class OpenBankingService @Inject() (connector: OpenBankingConnector, @Named("openBankingPaymentReturnUrl") openBankingPaymentReturnUrl: String) {
+class OpenBankingService @Inject() (connector: OpenBankingConnector,
+                                    p800Service: P800Service,
+                                    @Named("openBankingPaymentReturnUrl") openBankingPaymentReturnUrl: String
+                                   ) {
+  val previousTaxYear: Int = TaxYear.current.previous.startYear
 
   def getBanks(
     journeyId: JourneyId
@@ -48,23 +53,36 @@ class OpenBankingService @Inject() (connector: OpenBankingConnector, @Named("ope
 
   def createSession(
     request: CreateSessionRequest,
-    journeyId: JourneyId
+    journeyId: JourneyId,
+    ninoOpt: Option[String] = None,
+    sautrOpt: Option[SaUtr] = None
   )(implicit headerCarrier: HeaderCarrier, executionContext: ExecutionContext): Future[CreateSessionDataResponse] =
     if (request.taxType.isDefined) {
       request.taxType match {
         case Some(TaxTypeEnum.appSelfAssessment) =>
-          (request.amountInPence, request.reference, request.saUtr) match {
-            case (Some(amountInPence), Some(reference), Some(sautr)) =>
-              if (reference == sautr.utr)
+          (request.amountInPence, request.reference, request.saUtr, sautrOpt) match {
+            case (Some(amountInPence), Some(reference), requestUtrOpt, Some(authSautr)) =>
+              if (
+                (reference == authSautr.utr) && requestUtrOpt.exists(_.utr == authSautr.utr)
+              ) // For self assessment - check if reference is equal to auth sautr and also equal to the sautr in payload request
                 connector.createSession(amountInPence, SelfAssessmentOriginSpecificData(SaUtr(reference)), journeyId)
               else throw new FailToMatchTaxIdOnAuth
+            case (_, _, _, None) =>
+              throw new UtrNotFoundOnAccount
             case _ =>
               throw new MalformedRequestException("Malformed Json")
           }
         case Some(TaxTypeEnum.appSimpleAssessment) =>
-          (request.amountInPence, request.reference) match {
-            case (Some(amountInPence), Some(reference)) =>
-              connector.createSession(amountInPence, SimpleAssessmentOriginSpecificData(reference), journeyId)
+          (request.amountInPence, request.reference, ninoOpt) match {
+            case (Some(amountInPence), Some(reference), ninoOpt) =>
+              p800Service.getChargeRefernceList(ninoOpt, previousTaxYear).flatMap {
+                referenceList => // For simple assessment - fetch reference list for the logged-in user
+                  if (referenceList.contains(reference)) { // Check if the payload reference is in the above list
+                    connector.createSession(amountInPence, SimpleAssessmentOriginSpecificData(reference), journeyId)
+                  } else {
+                    throw new FailToMatchTaxIdOnAuth
+                  }
+              }
             case _ =>
               throw new MalformedRequestException("Malformed Json")
           }
@@ -73,11 +91,17 @@ class OpenBankingService @Inject() (connector: OpenBankingConnector, @Named("ope
 
       }
     } else {
-      (request.amount, request.saUtr) match {
-        case (Some(amount), Some(saUtr)) =>
-          connector
-            .createSession(BigDecimal((amount * 100).longValue), SelfAssessmentOriginSpecificData(saUtr), journeyId)
-        case _ => throw new MalformedRequestException("Malformed Json")
+      (request.amount, request.saUtr, sautrOpt) match { // If no tas type is mentioned, then default self assessment type is taken into consideration
+        case (Some(amount), Some(saUtr), Some(authSautr)) =>
+          if (saUtr.utr == authSautr.utr) { // check if sautr in the request equals auth sautr
+            connector
+              .createSession(BigDecimal((amount * 100).longValue), SelfAssessmentOriginSpecificData(saUtr), journeyId)
+          } else {
+            Future.failed(throw new FailToMatchTaxIdOnAuth)
+          }
+
+        case _ =>
+          throw new MalformedRequestException("Malformed Json")
       }
     }
 

@@ -1,0 +1,38 @@
+{
+  "nino": "<NINO>",
+  "businessReason": "P302",
+  "receivableStatus": "OUTSTANDING",
+  "taxYear": ""<CY-1>"",
+  "eligibility": true,
+  "totalAmountOwed": 100,
+  "chargeReference":"XQ004100001541",
+  "dueDate":""<CY-0>"-02-28",
+  "receipts":[
+    {
+      "receiptAmount":100.00,
+      "allocatedAmount":0,
+      "receiptDate":""<CY-1>"-06-16",
+      "receiptMethod":"CODED OUT",
+      "receiptStatus":"CODED OUT"
+    }
+  ],
+  "previousTaxYear": {
+    "nino": "<NINO>",
+    "businessReason": "P302",
+    "receivableStatus": "OUTSTANDING",
+    "taxYear": ""<CY-2>"",
+    "eligibility": true,
+    "totalAmountOwed": 150,
+    "chargeReference":"XQ004100001542",
+    "dueDate":""<CY-0>"-02-28",
+    "receipts":[
+      {
+        "receiptAmount":150.00,
+        "allocatedAmount":0,
+        "receiptDate":""<CY-2>"-06-16",
+        "receiptMethod":"CODED OUT",
+        "receiptStatus":"CODED OUT"
+      }
+    ]
+  }
+}

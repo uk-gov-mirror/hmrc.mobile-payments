@@ -6,7 +6,7 @@ object AppDependencies {
   private val playHmrcApiVersion = "9.0.0"
   private val refinedVersion = "0.11.3"
   private val domainVersion = "13.0.0"
-
+  private val taxYearVersion = "6.0.0"
   private val scalaMockVersion = "7.5.5"
   private val pekkoHttpVersion = "1.2.0" // replaced akka with pekko and upgraded mixing version messing up with test cases
   private val pekkoActorVersion = "1.0.3" // keep these two versions same until some compatible version come up
@@ -18,7 +18,8 @@ object AppDependencies {
     "com.beachape"     %% "enumeratum"            % "1.9.7",
     "org.typelevel"    %% "cats-core"             % "2.13.0",
     "org.apache.pekko" %% "pekko-http"            % pekkoHttpVersion,
-    "org.apache.pekko" %% "pekko-actor"           % pekkoActorVersion
+    "org.apache.pekko" %% "pekko-actor"           % pekkoActorVersion,
+    "uk.gov.hmrc"      %% "tax-year"              % taxYearVersion
   )
 
   trait TestDependencies {

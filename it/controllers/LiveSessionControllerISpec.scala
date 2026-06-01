@@ -9,6 +9,7 @@ import uk.gov.hmrc.mobilepayments.MobilePaymentsTestData
 import uk.gov.hmrc.mobilepayments.domain.dto.response.SessionDataResponse
 import utils.BaseISpec
 import play.api.libs.ws.writeableOf_JsValue
+import stubs.P800Stub.stubForP800Response
 import uk.gov.hmrc.mobilepayments.models.openBanking.response.CreateSessionDataResponse
 
 import java.time.LocalDate
@@ -16,11 +17,12 @@ import java.time.LocalDate
 class LiveSessionControllerISpec extends BaseISpec with MobilePaymentsTestData {
 
   "POST /sessions" should {
-    "return 200 when payload is valid" in {
+    "return 200 when payload is valid and taxType not supplied" in {
       grantAccess()
       stubForShutteringDisabled
       stubForCreateSession(response = createSessionDataResponseJson)
       getUTRFromAuth()
+      getNinoFromAuth()
 
       val request: WSRequest = wsUrl(
         s"/sessions?journeyId=$journeyId"
@@ -36,6 +38,7 @@ class LiveSessionControllerISpec extends BaseISpec with MobilePaymentsTestData {
       stubForShutteringDisabled
       stubForCreateSession(response = createSessionDataResponseJson)
       getUTRFromAuth()
+      getNinoFromAuth()
 
       val request: WSRequest = wsUrl(
         s"/sessions?journeyId=$journeyId"
@@ -48,33 +51,76 @@ class LiveSessionControllerISpec extends BaseISpec with MobilePaymentsTestData {
       parsedResponse.sessionDataId.value shouldBe "51cc67d6-21da-11ec-9621-0242ac130002"
     }
 
-//    "return 200 when payload is valid and the taxType is set to appSimpleAssessment" in {
-//      grantAccess()
-//      stubForShutteringDisabled
-//      stubForCreateSession(response = createSessionDataResponseJson)
-//
-//
-//      val request: WSRequest = wsUrl(
-//        s"/sessions?journeyId=$journeyId"
-//      ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
-//      val response = await(
-//        request.post(Json.obj("amountInPence" -> 1200, "reference" -> "CS700100A", "taxType" -> "appSimpleAssessment"))
-//      )
-//      response.status shouldBe 200
-//      val parsedResponse = Json.parse(response.body).as[CreateSessionDataResponse]
-//      parsedResponse.sessionDataId.value shouldBe "51cc67d6-21da-11ec-9621-0242ac130002"
-//    }
-
-    "return 500 when request from session is malformed" in {
+    "return 401 when taxType is set to appSelfAssessment and reference don;t match auth utr" in {
       grantAccess()
       stubForShutteringDisabled
-      stubForCreateSession(response = rawMalformedJson)
+      stubForCreateSession(response = createSessionDataResponseJson)
       getUTRFromAuth()
+      getNinoFromAuth()
 
       val request: WSRequest = wsUrl(
         s"/sessions?journeyId=$journeyId"
       ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
-      val response = await(request.post(Json.obj("amount" -> 1200, "saUtr" -> "CS700100A")))
+      val response = await(
+        request.post(Json.obj("amountInPence" -> 1200, "reference" -> "1234", "taxType" -> "appSelfAssessment"))
+      )
+      response.status shouldBe 401
+
+    }
+
+    "return 200 when payload is valid and the taxType is set to appSimpleAssessment" in {
+      grantAccess()
+      stubForShutteringDisabled
+      stubForCreateSession(response = createSessionDataResponseJson)
+      getUTRFromAuth()
+      getNinoFromAuth()
+      stubForP800Response(nino, taxYear, chargeRef1, chargeRef2)
+
+      val request: WSRequest = wsUrl(
+        s"/sessions?journeyId=$journeyId"
+      ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+      val response = await(
+        request.post(Json.obj("amountInPence" -> 1200, "reference" -> chargeRef1, "taxType" -> "appSimpleAssessment"))
+      )
+      response.status shouldBe 200
+      val parsedResponse = Json.parse(response.body).as[CreateSessionDataResponse]
+      parsedResponse.sessionDataId.value shouldBe "51cc67d6-21da-11ec-9621-0242ac130002"
+    }
+
+    "return 401 when  taxType = appSimpleAssessment but request reference don't match auth reference" in {
+      grantAccess()
+      stubForShutteringDisabled
+      getUTRFromAuth()
+      getNinoFromAuth()
+      stubForP800Response(nino, taxYear, chargeRef1, chargeRef2)
+
+      val request: WSRequest = wsUrl(
+        s"/sessions?journeyId=$journeyId"
+      ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+      val response = await(
+        request.post(
+          Json.obj("amountInPence" -> 1200,
+                   "reference" ->
+                     "1234",
+                   "taxType" -> "appSimpleAssessment"
+                  )
+        )
+      )
+      response.status shouldBe 401
+
+    }
+
+    "return 500 when response from session is malformed" in {
+      grantAccess()
+      stubForShutteringDisabled
+      stubForCreateSession(response = rawMalformedJson)
+      getUTRFromAuth()
+      getNinoFromAuth()
+
+      val request: WSRequest = wsUrl(
+        s"/sessions?journeyId=$journeyId"
+      ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+      val response = await(request.post(Json.obj("amount" -> 1098.3, "saUtr" -> "CS700100A")))
       response.status shouldBe 500
     }
 
@@ -83,7 +129,7 @@ class LiveSessionControllerISpec extends BaseISpec with MobilePaymentsTestData {
       stubForShutteringDisabled
       stubForCreateSession(401)
       getUTRFromAuth()
-
+      getNinoFromAuth()
       val request: WSRequest = wsUrl(
         s"/sessions?journeyId=$journeyId"
       ).addHttpHeaders(acceptJsonHeader, contentHeader)
@@ -96,6 +142,7 @@ class LiveSessionControllerISpec extends BaseISpec with MobilePaymentsTestData {
       stubForShutteringDisabled
       stubForCreateSession(404)
       getUTRFromAuth()
+      getNinoFromAuth()
 
       val request: WSRequest = wsUrl(
         s"/sessions?journeyId=$journeyId"
@@ -119,6 +166,7 @@ class LiveSessionControllerISpec extends BaseISpec with MobilePaymentsTestData {
       stubForShutteringDisabled
       stubForCreateSession(500)
       getUTRFromAuth()
+      getNinoFromAuth()
 
       val request: WSRequest = wsUrl(
         s"/sessions?journeyId=$journeyId"

@@ -20,6 +20,7 @@ import play.api.libs.json.{JsValue, Json}
 import play.api.mvc.{Action, AnyContent, BodyParser, ControllerComponents}
 import uk.gov.hmrc.auth.core.{AuthConnector, AuthorisationException, InsufficientEnrolments}
 import uk.gov.hmrc.http.{HeaderCarrier, SessionId}
+import uk.gov.hmrc.mobilepayments.connectors.CitizenDetailsConnector
 import uk.gov.hmrc.mobilepayments.controllers.ControllerChecks
 import uk.gov.hmrc.mobilepayments.controllers.action.AccessControl
 import uk.gov.hmrc.mobilepayments.controllers.errors.{ErrorHandling, JsonHandler}
@@ -38,6 +39,7 @@ import scala.concurrent.{ExecutionContext, Future}
 @Singleton()
 class LivePaymentController @Inject() (
   override val authConnector: AuthConnector,
+  override val cdConnector: CitizenDetailsConnector,
   @Named("controllers.confidenceLevel") override val confLevel: Int,
   cc: ControllerComponents,
   openBankingService: OpenBankingService,
@@ -153,20 +155,18 @@ class LivePaymentController @Inject() (
         withShuttering(shuttered) {
           withErrorWrapper {
             withValidJson[LatestPaymentsRequest] { latestPaymentsRequest =>
-              getNinoFromAuth.flatMap { nino => // checking for auth NINO
-                getSaUTRFromAuth.flatMap { sautrOpt => // checking for auth sautr
-                  paymentsService
-                    .getLatestPayments(nino,
-                                       sautrOpt.map(_.utr),
-                                       Some(latestPaymentsRequest.reference),
-                                       Some(latestPaymentsRequest.taxType),
-                                       journeyId
-                                      ) map {
-                    case Right(None)                 => NotFound
-                    case Right(payments)             => Ok(Json.toJson(payments))
-                    case Left(s"Unauthorized! $msg") => Unauthorized(s"Unauthorized!")
-                    case Left(e)                     => InternalServerError(e)
-                  }
+              getNinoAndUtrFromAuth.flatMap { (sautrOpt, nino) =>
+                paymentsService
+                  .getLatestPayments(nino,
+                                     sautrOpt.map(_.utr),
+                                     Some(latestPaymentsRequest.reference),
+                                     Some(latestPaymentsRequest.taxType),
+                                     journeyId
+                                    ) map {
+                  case Right(None)                 => NotFound
+                  case Right(payments)             => Ok(Json.toJson(payments))
+                  case Left(s"Unauthorized! $msg") => Unauthorized(s"Unauthorized!")
+                  case Left(e)                     => InternalServerError(e)
                 }
               }
             }
@@ -183,17 +183,15 @@ class LivePaymentController @Inject() (
         withShuttering(shuttered) {
           withErrorWrapper {
             withValidJson[PayByCardRequestGeneric] { payByCardRequest =>
-              getNinoFromAuth.flatMap { nino =>
-                getSaUTRFromAuth.flatMap { sautrOpt =>
-                  paymentsService
-                    .getPayByCardUrl(
-                      payByCardRequest,
-                      nino,
-                      sautrOpt,
-                      journeyId
-                    )
-                    .map(response => Ok(Json.toJson(response)))
-                }
+              getNinoAndUtrFromAuth.flatMap { (sautrOpt, nino) =>
+                paymentsService
+                  .getPayByCardUrl(
+                    payByCardRequest,
+                    nino,
+                    sautrOpt,
+                    journeyId
+                  )
+                  .map(response => Ok(Json.toJson(response)))
               }
             }
           }

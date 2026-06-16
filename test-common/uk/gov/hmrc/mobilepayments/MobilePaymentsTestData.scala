@@ -29,6 +29,7 @@ import scala.io.Source
 
 trait MobilePaymentsTestData {
   val nino: Option[String] = Some("CS700100A")
+
   val chargeRef1: String = "XC123456789"
   val chargeRef2 = "XC987654321"
   val chargeRefList = List(chargeRef1, chargeRef2)

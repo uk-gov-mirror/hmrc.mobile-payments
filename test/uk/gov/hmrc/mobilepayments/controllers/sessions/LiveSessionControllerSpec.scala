@@ -20,11 +20,13 @@ import org.scalamock.handlers.CallHandler
 import play.api.libs.json.Json
 import play.api.test.Helpers.*
 import play.api.test.{FakeRequest, Helpers}
-import uk.gov.hmrc.auth.core.{AuthConnector, ConfidenceLevel}
+import uk.gov.hmrc.auth.core.{AuthConnector, ConfidenceLevel, Enrolment}
 import uk.gov.hmrc.domain.SaUtr
 import uk.gov.hmrc.http.{HeaderCarrier, UpstreamErrorResponse}
 import uk.gov.hmrc.mobilepayments.MobilePaymentsTestData
 import uk.gov.hmrc.mobilepayments.common.BaseSpec
+import uk.gov.hmrc.mobilepayments.connectors.CitizenDetailsConnector
+import uk.gov.hmrc.mobilepayments.controllers.errors.{FailToMatchTaxIdOnAuth, MalformedRequestException}
 import uk.gov.hmrc.mobilepayments.domain.Shuttering
 import uk.gov.hmrc.mobilepayments.domain.dto.request.CreateSessionRequest
 import uk.gov.hmrc.mobilepayments.domain.dto.response.SessionDataResponse
@@ -40,136 +42,242 @@ class LiveSessionControllerSpec extends BaseSpec with AuthorisationStub with Mob
 
   private val mockOpenBankingService: OpenBankingService = mock[OpenBankingService]
   private val sessionDataId: String = "51cc67d6-21da-11ec-9621-0242ac130002"
-
+  private val utr: String = "12212321"
   implicit val mockShutteringService: ShutteringService = mock[ShutteringService]
   implicit val mockAuthConnector: AuthConnector = mock[AuthConnector]
+  implicit val mockCitizenDetailsConnector: CitizenDetailsConnector = mock[CitizenDetailsConnector]
   implicit val mockAuditService: AuditService = mock[AuditService]
 
   private val sut = new LiveSessionController(
     mockAuthConnector,
+    mockCitizenDetailsConnector,
     ConfidenceLevel.L200.level,
     Helpers.stubControllerComponents(),
     mockOpenBankingService,
     mockShutteringService
   )
 
-  "when create session invoked and service returns success then" should {
-    "return 200" in {
-      stubAuthorisationGrantAccess(authorisedResponse)
-      shutteringDisabled()
-      stubGetUTRFromAuth(utrAndEnrolmentResponse)
-      stubGetNinoFromAuth(nino)
-      mockCreateSession(Future successful createSessionDataResponse)
+  "Create Session" when {
 
-      val request = FakeRequest("POST", "/sessions")
-        .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
-        .withBody(Json.obj("amount" -> 1234, "reference" -> "12212321"))
+    "taxType = appSelfAssessment" should {
 
-      val result = sut.createSession(journeyId)(request)
-      status(result) shouldBe 200
-      val response = contentAsJson(result).as[CreateSessionDataResponse]
-      response.sessionDataId.value shouldEqual sessionDataId
+      "return 200,  if payload reference == UTR and  IR-SA enrolment is there " in {
+        stubAuthorisationGrantAccess(authorisedResponse)
+        shutteringDisabled()
+        stubGetNinoAndUTRFromAuth(getNinoUtrEnrolmentResponse(nino, Some(utr), saOnlyEnrolments))
+        mockCreateSession(Future successful createSessionDataResponse)
+
+        val request = FakeRequest("POST", "/sessions")
+          .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
+          .withBody(Json.obj("amountInPence" -> 1234, "reference" -> "12212321", "taxType" -> "appSelfAssessment"))
+
+        val result = sut.createSession(journeyId)(request)
+        status(result) shouldBe 200
+        val response = contentAsJson(result).as[CreateSessionDataResponse]
+        response.sessionDataId.value shouldEqual sessionDataId
+      }
+
+      "return 200,  if payload reference == UTR and  IR-SA AND MTD enrolments are there " in {
+        stubAuthorisationGrantAccess(authorisedResponse)
+        shutteringDisabled()
+        stubGetNinoAndUTRFromAuth(getNinoUtrEnrolmentResponse(nino, Some(utr), saMTDEnrolments))
+        mockCreateSession(Future successful createSessionDataResponse)
+
+        val request = FakeRequest("POST", "/sessions")
+          .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
+          .withBody(Json.obj("amountInPence" -> 1234, "reference" -> "12212321", "taxType" -> "appSelfAssessment"))
+
+        val result = sut.createSession(journeyId)(request)
+        status(result) shouldBe 200
+        val response = contentAsJson(result).as[CreateSessionDataResponse]
+        response.sessionDataId.value shouldEqual sessionDataId
+      }
+
+      "return 200,  if payload reference == UTR and  only MTD enrolments are there " in {
+        stubAuthorisationGrantAccess(authorisedResponse)
+        shutteringDisabled()
+        stubGetNinoAndUTRFromAuth(getNinoUtrEnrolmentResponse(nino, None, mtdOnlyEnrolments))
+        stubGetUTRByNino(Future.successful(Some(SaUtr(utr))))
+        mockCreateSession(Future successful createSessionDataResponse)
+
+        val request = FakeRequest("POST", "/sessions")
+          .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
+          .withBody(Json.obj("amountInPence" -> 1234, "reference" -> "12212321", "taxType" -> "appSelfAssessment"))
+
+        val result = sut.createSession(journeyId)(request)
+        status(result) shouldBe 200
+        val response = contentAsJson(result).as[CreateSessionDataResponse]
+        response.sessionDataId.value shouldEqual sessionDataId
+      }
+
+      "return 401,  if payload reference != UTR no matter what enrolment is present " in {
+        stubAuthorisationGrantAccess(authorisedResponse)
+        shutteringDisabled()
+        stubGetNinoAndUTRFromAuth(getNinoUtrEnrolmentResponse(nino, None, mtdOnlyEnrolments))
+        stubGetUTRByNino(Future.successful(Some(SaUtr(utr))))
+        mockCreateSession(Future.failed(new FailToMatchTaxIdOnAuth))
+
+        val request = FakeRequest("POST", "/sessions")
+          .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
+          .withBody(Json.obj("amountInPence" -> 1234, "reference" -> "12212321", "taxType" -> "appSelfAssessment"))
+
+        val result = sut.createSession(journeyId)(request)
+        status(result) shouldBe 401
+
+      }
+
+      "return 401,  if auth fails " in {
+        stubAuthorisationWithAuthorisationException()
+
+        val request = FakeRequest("POST", "/sessions")
+          .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
+          .withBody(Json.obj("amountInPence" -> 1234, "reference" -> "12212321", "taxType" -> "appSelfAssessment"))
+
+        val result = sut.createSession(journeyId)(request)
+        status(result) shouldBe 401
+
+      }
+
+      "return 500, if service returns 5XX" in {
+        stubAuthorisationGrantAccess(authorisedResponse)
+        shutteringDisabled()
+        stubGetNinoAndUTRFromAuth(getNinoUtrEnrolmentResponse(nino, Some(utr), saMTDEnrolments))
+        mockCreateSession(Future failed UpstreamErrorResponse("Error", 502, 502))
+
+        val request = FakeRequest("POST", "/sessions")
+          .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
+          .withBody(Json.obj("amountInPence" -> 1234, "reference" -> "12212321", "taxType" -> "appSelfAssessment"))
+
+        val result = sut.createSession(journeyId)(request)
+        status(result) shouldBe 500
+      }
     }
-  }
 
-  "Calling create session with taxType as SimpleAssessment, reference and amountInPence" should {
-    "return 200" in {
-      stubAuthorisationGrantAccess(authorisedResponse)
-      shutteringDisabled()
-      stubGetUTRFromAuth(utrAndEnrolmentResponse)
-      stubGetNinoFromAuth(nino)
-      mockCreateSession(Future successful createSessionDataResponse)
+    "taxType = appSimpleAssessment" should {
 
-      val request = FakeRequest("POST", "/sessions")
-        .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
-        .withBody(Json.obj("amountInPence" -> 1234, "reference" -> "12212321", "taxType" -> "appSimpleAssessment"))
+      "return 200, if payload reference == logged in charge reference" in {
+        stubAuthorisationGrantAccess(authorisedResponse)
+        shutteringDisabled()
+        stubGetNinoAndUTRFromAuth(getNinoUtrEnrolmentResponse(nino, None))
+        mockCreateSession(Future successful createSessionDataResponse)
 
-      val result = sut.createSession(journeyId)(request)
-      status(result) shouldBe 200
-      val response = contentAsJson(result).as[CreateSessionDataResponse]
-      response.sessionDataId.value shouldEqual sessionDataId
+        val request = FakeRequest("POST", "/sessions")
+          .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
+          .withBody(Json.obj("amountInPence" -> 1234, "reference" -> "12212321", "taxType" -> "appSimpleAssessment"))
+
+        val result = sut.createSession(journeyId)(request)
+        status(result) shouldBe 200
+        val response = contentAsJson(result).as[CreateSessionDataResponse]
+        response.sessionDataId.value shouldEqual sessionDataId
+      }
+
+      "return 401, if service return FailToMatchTaxIdOnAuth" in {
+
+        stubAuthorisationGrantAccess(authorisedResponse)
+        shutteringDisabled()
+        stubGetNinoAndUTRFromAuth(getNinoUtrEnrolmentResponse(nino, None))
+        mockCreateSession(Future.failed(new FailToMatchTaxIdOnAuth))
+
+        val request = FakeRequest("POST", "/sessions")
+          .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
+          .withBody(Json.obj("amountInPence" -> 1234, "reference" -> "12212321", "taxType" -> "appSimpleAssessment"))
+
+        val result = sut.createSession(journeyId)(request)
+        status(result) shouldBe 401
+
+      }
+
+      "return 400, if service fails with malformed exception" in {
+
+        stubAuthorisationGrantAccess(authorisedResponse)
+        shutteringDisabled()
+        stubGetNinoAndUTRFromAuth(getNinoUtrEnrolmentResponse(nino, None))
+        mockCreateSession(Future.failed(new MalformedRequestException("malformed")))
+
+        val request = FakeRequest("POST", "/sessions")
+          .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
+          .withBody(Json.obj("amountInPence" -> 1234, "reference" -> "12212321", "taxType" -> "appSimpleAssessment"))
+
+        val result = sut.createSession(journeyId)(request)
+        status(result) shouldBe 400
+
+      }
+
+      "return 401,  if auth fails " in {
+        stubAuthorisationWithAuthorisationException()
+
+        val request = FakeRequest("POST", "/sessions")
+          .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
+          .withBody(Json.obj("amountInPence" -> 1234, "reference" -> "12212321", "taxType" -> "appSimpleAssessment"))
+
+        val result = sut.createSession(journeyId)(request)
+        status(result) shouldBe 401
+
+      }
+
+      "return 500, if the service returns 5XX" in {
+        stubAuthorisationGrantAccess(authorisedResponse)
+        shutteringDisabled()
+        stubGetNinoAndUTRFromAuth(getNinoUtrEnrolmentResponse(nino, None))
+        mockCreateSession(Future failed UpstreamErrorResponse("Error", 502, 502))
+
+        val request = FakeRequest("POST", "/sessions")
+          .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
+          .withBody(Json.obj("amountInPence" -> 1234, "reference" -> "12212321", "taxType" -> "appSimpleAssessment"))
+
+        val result = sut.createSession(journeyId)(request)
+        status(result) shouldBe 500
+      }
+
     }
-  }
 
-  "Calling create session with taxType as SelfAssessment, reference and amountInPence" should {
-    "return 200" in {
-      stubAuthorisationGrantAccess(authorisedResponse)
-      shutteringDisabled()
-      stubGetUTRFromAuth(utrAndEnrolmentResponse)
-      stubGetNinoFromAuth(nino)
-      mockCreateSession(Future successful createSessionDataResponse)
+    "taxType not present" should {
 
-      val request = FakeRequest("POST", "/sessions")
-        .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
-        .withBody(Json.obj("amountInPence" -> 1234, "reference" -> "12212321", "taxType" -> "appSelfAssessment"))
+      "return 200 if amount and sautr are present and request sautr == auth sautr" in {
+        stubAuthorisationGrantAccess(authorisedResponse)
+        shutteringDisabled()
+        stubGetNinoAndUTRFromAuth(getNinoUtrEnrolmentResponse(nino, Some(utr), saOnlyEnrolments))
+        mockCreateSession(Future successful createSessionDataResponse)
 
-      val result = sut.createSession(journeyId)(request)
-      status(result) shouldBe 200
-      val response = contentAsJson(result).as[CreateSessionDataResponse]
-      response.sessionDataId.value shouldEqual sessionDataId
-    }
-  }
+        val request = FakeRequest("POST", "/sessions")
+          .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
+          .withBody(Json.obj("amount" -> 1234, "saUtr" -> utr))
 
-  "when create session invoked with malformed json then" should {
-    "return 400" in {
-      stubAuthorisationGrantAccess(authorisedResponse)
-      shutteringDisabled()
-      stubGetUTRFromAuth(utrAndEnrolmentResponse)
-      stubGetNinoFromAuth(nino)
-      mockCreateSession(Future failed UpstreamErrorResponse("Error", 400, 400))
-      val request = FakeRequest("POST", "/sessions")
-        .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
-        .withBody(Json.obj("bad-key" -> 1234, "saUtr" -> "12212321"))
+        val result = sut.createSession(journeyId)(request)
+        status(result) shouldBe 200
+        val response = contentAsJson(result).as[CreateSessionDataResponse]
+        response.sessionDataId.value shouldEqual sessionDataId
+      }
 
-      val result = sut.createSession(journeyId)(request)
-      status(result) shouldBe 400
-    }
-  }
+      "return 401, if sautr !== auth sautr" in {
+        stubAuthorisationGrantAccess(authorisedResponse)
+        shutteringDisabled()
+        stubGetNinoAndUTRFromAuth(getNinoUtrEnrolmentResponse(nino, None, mtdOnlyEnrolments))
+        stubGetUTRByNino(Future.successful(Some(SaUtr(utr))))
+        mockCreateSession(Future.failed(new FailToMatchTaxIdOnAuth))
 
-  "when create session invoked and service returns 401 then" should {
-    "return 401" in {
-      stubAuthorisationGrantAccess(authorisedResponse)
-      shutteringDisabled()
-      stubGetUTRFromAuth(utrAndEnrolmentResponse)
-      stubGetNinoFromAuth(nino)
-      mockCreateSession(Future failed UpstreamErrorResponse("Error", 401, 401))
+        val request = FakeRequest("POST", "/sessions")
+          .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
+          .withBody(Json.obj("amount" -> 1234, "saUtr" -> "12212321"))
 
-      val request = FakeRequest("POST", "/sessions")
-        .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
-        .withBody(Json.obj("amount" -> 1234, "saUtr" -> "12212321"))
+        val result = sut.createSession(journeyId)(request)
+        status(result) shouldBe 401
+      }
 
-      val result = sut.createSession(journeyId)(request)
-      status(result) shouldBe 401
-    }
-  }
+      "return 400, malformed json if the service return 400" in {
+        stubAuthorisationGrantAccess(authorisedResponse)
+        shutteringDisabled()
+        stubGetNinoAndUTRFromAuth(getNinoUtrEnrolmentResponse(nino, None))
+        mockCreateSession(Future.failed(new MalformedRequestException("malformed")))
 
-  "when create session invoked and auth fails then" should {
-    "return 401" in {
-      stubAuthorisationWithAuthorisationException()
+        val request = FakeRequest("POST", "/sessions")
+          .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
+          .withBody(Json.obj("amount" -> 1234, "saUtr" -> "12212321"))
 
-      val request = FakeRequest("POST", "/sessions")
-        .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
-        .withBody(Json.obj("amount" -> 1234, "saUtr" -> "CS700100A"))
+        val result = sut.createSession(journeyId)(request)
+        status(result) shouldBe 400
+      }
 
-      val result = sut.createSession(journeyId)(request)
-      status(result) shouldBe 401
-    }
-  }
-
-  "when create session invoked and service returns 5XX then" should {
-    "return 500" in {
-      stubAuthorisationGrantAccess(authorisedResponse)
-      shutteringDisabled()
-      stubGetUTRFromAuth(utrAndEnrolmentResponse)
-      stubGetNinoFromAuth(nino)
-      mockCreateSession(Future failed UpstreamErrorResponse("Error", 502, 502))
-
-      val request = FakeRequest("POST", "/sessions")
-        .withHeaders("Accept" -> "application/vnd.hmrc.1.0+json", "Content-Type" -> "application/json")
-        .withBody(Json.obj("amount" -> 1234, "saUtr" -> "12212321"))
-
-      val result = sut.createSession(journeyId)(request)
-      status(result) shouldBe 500
     }
   }
 

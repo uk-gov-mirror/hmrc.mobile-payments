@@ -20,6 +20,7 @@ import play.api.libs.json.{JsValue, Json}
 import play.api.mvc.{Action, AnyContent, BodyParser, ControllerComponents}
 import uk.gov.hmrc.auth.core.AuthConnector
 import uk.gov.hmrc.http.HeaderCarrier
+import uk.gov.hmrc.mobilepayments.connectors.CitizenDetailsConnector
 import uk.gov.hmrc.mobilepayments.controllers.ControllerChecks
 import uk.gov.hmrc.mobilepayments.controllers.action.AccessControl
 import uk.gov.hmrc.mobilepayments.controllers.errors.{ErrorHandling, JsonHandler}
@@ -34,12 +35,13 @@ import scala.concurrent.ExecutionContext
 
 @Singleton()
 class LiveBankController @Inject() (
-  override val authConnector:                                   AuthConnector,
+  override val authConnector: AuthConnector,
+  override val cdConnector: CitizenDetailsConnector,
   @Named("controllers.confidenceLevel") override val confLevel: Int,
-  cc:                                                           ControllerComponents,
-  openBankingService:                                           OpenBankingService,
-  shutteringService:                                            ShutteringService
-)(implicit val executionContext:                                ExecutionContext)
+  cc: ControllerComponents,
+  openBankingService: OpenBankingService,
+  shutteringService: ShutteringService
+)(implicit val executionContext: ExecutionContext)
     extends BackendController(cc)
     with BankController
     with AccessControl
@@ -48,7 +50,7 @@ class LiveBankController @Inject() (
     with JsonHandler {
 
   override def parser: BodyParser[AnyContent] = controllerComponents.parsers.anyContent
-  override val app:    String                 = "Bank-Controller"
+  override val app: String = "Bank-Controller"
 
   def getBanks(journeyId: JourneyId): Action[AnyContent] =
     validateAcceptWithAuth(acceptHeaderValidationRules).async { implicit request =>
@@ -68,7 +70,7 @@ class LiveBankController @Inject() (
 
   override def selectBank(
     sessionDataId: String,
-    journeyId:     JourneyId
+    journeyId: JourneyId
   ): Action[JsValue] =
     validateAcceptWithAuth(acceptHeaderValidationRules).async(parse.json) { implicit request =>
       implicit val hc: HeaderCarrier = fromRequest(request)

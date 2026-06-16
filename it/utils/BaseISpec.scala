@@ -51,7 +51,8 @@ abstract class BaseISpec
       "microservice.services.open-banking.port"      -> wireMockPort,
       "microservice.services.payments.port"          -> wireMockPort,
       "microservice.services.mobile-shuttering.port" -> wireMockPort,
-      "microservice.services.p800-payments.port"     -> wireMockPort
+      "microservice.services.p800-payments.port"     -> wireMockPort,
+      "microservice.services.citizen-details.port"   -> wireMockPort
     )
 
   protected def appBuilder: GuiceApplicationBuilder = new GuiceApplicationBuilder().configure(config)

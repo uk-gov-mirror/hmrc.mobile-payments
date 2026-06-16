@@ -54,7 +54,9 @@ class GuiceModule(
     bind(classOf[String])
       .annotatedWith(named("payments"))
       .toInstance(servicesConfig.baseUrl("payments"))
-
+    bind(classOf[String])
+      .annotatedWith(named("citizen-details"))
+      .toInstance(servicesConfig.baseUrl("citizen-details"))
     bind(classOf[String])
       .annotatedWith(named("onlinePaymentsBaseUrl"))
       .toInstance(servicesConfig.baseUrl("p800-payments"))

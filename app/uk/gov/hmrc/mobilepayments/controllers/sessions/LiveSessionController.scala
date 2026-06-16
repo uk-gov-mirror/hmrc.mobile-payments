@@ -20,6 +20,7 @@ import play.api.libs.json.{JsValue, Json}
 import play.api.mvc.{Action, AnyContent, BodyParser, ControllerComponents}
 import uk.gov.hmrc.auth.core.AuthConnector
 import uk.gov.hmrc.http.HeaderCarrier
+import uk.gov.hmrc.mobilepayments.connectors.CitizenDetailsConnector
 import uk.gov.hmrc.mobilepayments.controllers.ControllerChecks
 import uk.gov.hmrc.mobilepayments.controllers.action.AccessControl
 import uk.gov.hmrc.mobilepayments.controllers.errors.{ErrorHandling, JsonHandler}
@@ -36,6 +37,7 @@ import scala.concurrent.ExecutionContext
 @Singleton()
 class LiveSessionController @Inject() (
   override val authConnector: AuthConnector,
+  override val cdConnector: CitizenDetailsConnector,
   @Named("controllers.confidenceLevel") override val confLevel: Int,
   cc: ControllerComponents,
   openBankingService: OpenBankingService,
@@ -58,24 +60,20 @@ class LiveSessionController @Inject() (
         withShuttering(shuttered) {
           withErrorWrapper {
             withValidJson[CreateSessionRequest] { createPaymentRequest =>
-              getSaUTRFromAuth.flatMap { sautrOpt =>
+              getNinoAndUtrFromAuth.flatMap { (sautrOpt, nino) =>
                 val updatedCreatePaymentRequest =
                   if (createPaymentRequest.saUtr.isEmpty) createPaymentRequest.copy(saUtr = sautrOpt)
                   else
                     createPaymentRequest // check if request have sautr or not. If present, keep the request else put auth sautr in request behind the scene
-                getNinoFromAuth.flatMap { ninoOpt =>
-                  openBankingService
-                    .createSession(
-                      updatedCreatePaymentRequest,
-                      journeyId,
-                      ninoOpt,
-                      sautrOpt
-                    )
-                    .map(response => Ok(Json.toJson[CreateSessionDataResponse](response)))
-                }
-
+                openBankingService
+                  .createSession(
+                    updatedCreatePaymentRequest,
+                    journeyId,
+                    nino,
+                    sautrOpt
+                  )
+                  .map(response => Ok(Json.toJson[CreateSessionDataResponse](response)))
               }
-
             }
           }
         }

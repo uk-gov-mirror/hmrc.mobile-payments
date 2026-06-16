@@ -11,6 +11,7 @@ import uk.gov.hmrc.mobilepayments.domain.dto.response.{LatestPaymentsResponse, P
 import uk.gov.hmrc.mobilepayments.models.openBanking.response.InitiatePaymentResponse
 import utils.BaseISpec
 import play.api.libs.ws.writeableOf_JsValue
+import stubs.CidStub.getStubToFetchUtrViaNino
 import stubs.P800Stub.stubForP800Response
 
 import java.time.LocalDate
@@ -20,6 +21,7 @@ class LivePaymentControllerISpec extends BaseISpec with MobilePaymentsTestData {
   private val paymentUrl: String = "https://some-bank.com?param=dosomething"
 
   "POST /payments" should {
+
     "return 200 with payment url" in {
       grantAccess()
       stubForShutteringDisabled
@@ -431,263 +433,692 @@ class LivePaymentControllerISpec extends BaseISpec with MobilePaymentsTestData {
     }
   }
 
-  "POST /payments/latest-payments" should {
-    "return 200 with the latest payments when taxType = appSelfAssessment" in {
-      grantAccess()
-      stubForShutteringDisabled
-      stubForGetPayments(200, paymentsResponseString())
-      getUTRFromAuth("1122334455")
-      getNinoFromAuth()
+  "POST /payments/latest-payments" when {
+    val malformedSAJson =
+      s"""
+         |{
+         |"taxType": "appSelfAssessment"
+         |}
+         |""".stripMargin
 
-      val request: WSRequest = wsUrl(
-        s"/payments/latest-payments?journeyId=$journeyId"
-      ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
-      val response = await(request.post(Json.parse(latestPaymentsSelfAssessmentJson)))
-      response.status shouldBe 200
-      val parsedResponse = Json.parse(response.body).as[LatestPaymentsResponse]
-      parsedResponse.payments.size               shouldBe 2
-      parsedResponse.payments.head.date.toString shouldBe LocalDate.now().toString
-      parsedResponse.payments.head.amountInPence shouldBe 11100
+    val malformedSimpleJson =
+      s"""
+         |{
+         |"taxType": "appSimpleAssessment"
+         |}
+         |""".stripMargin
+
+    val malformedJson =
+      s"""
+         |{
+         |"reference": "12344"
+         |}
+         |""".stripMargin
+    "taxType = appSelfAssessment" should {
+
+      "return 200, if user has IR-SA enrolment and auth utr == payload reference" in {
+        grantAccess()
+        stubForShutteringDisabled
+        getNinoAndUTRFromAuth(isSaActive = true)
+        stubForGetPayments(200, paymentsResponseString())
+
+        val request: WSRequest = wsUrl(
+          s"/payments/latest-payments?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.parse(latestPaymentsSelfAssessmentJson)))
+        response.status shouldBe 200
+        val parsedResponse = Json.parse(response.body).as[LatestPaymentsResponse]
+        parsedResponse.payments.size               shouldBe 2
+        parsedResponse.payments.head.date.toString shouldBe LocalDate.now().toString
+        parsedResponse.payments.head.amountInPence shouldBe 11100
+      }
+
+      "return 200, if user has IR-SA And MTD enrolments  and auth utr == payload reference" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForGetPayments(200, paymentsResponseString())
+        getNinoAndUTRFromAuth(isSaActive = true, isMtdActive = true)
+
+        val request: WSRequest = wsUrl(
+          s"/payments/latest-payments?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.parse(latestPaymentsSelfAssessmentJson)))
+        response.status shouldBe 200
+        val parsedResponse = Json.parse(response.body).as[LatestPaymentsResponse]
+        parsedResponse.payments.size               shouldBe 2
+        parsedResponse.payments.head.date.toString shouldBe LocalDate.now().toString
+        parsedResponse.payments.head.amountInPence shouldBe 11100
+      }
+
+      "return 200, if user has only MTD enrolments ,utr is fetched via cid and fetched utr == payload reference" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForGetPayments(200, paymentsResponseString())
+        getNinoAndNOUtrInRetreivals(isMtdActive = true)
+        getStubToFetchUtrViaNino(nino.get, utr)
+
+        val request: WSRequest = wsUrl(
+          s"/payments/latest-payments?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.parse(latestPaymentsSelfAssessmentJson)))
+        response.status shouldBe 200
+        val parsedResponse = Json.parse(response.body).as[LatestPaymentsResponse]
+        parsedResponse.payments.size               shouldBe 2
+        parsedResponse.payments.head.date.toString shouldBe LocalDate.now().toString
+        parsedResponse.payments.head.amountInPence shouldBe 11100
+      }
+
+      "return 200, if user has only MTD enrolments ,but utr is there in retrievals and fetched utr == payload reference" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForGetPayments(200, paymentsResponseString())
+        getNinoAndUTRFromAuth(isMtdActive = true)
+        getStubToFetchUtrViaNino(nino.get, utr)
+
+        val request: WSRequest = wsUrl(
+          s"/payments/latest-payments?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.parse(latestPaymentsSelfAssessmentJson)))
+        response.status shouldBe 200
+        val parsedResponse = Json.parse(response.body).as[LatestPaymentsResponse]
+        parsedResponse.payments.size               shouldBe 2
+        parsedResponse.payments.head.date.toString shouldBe LocalDate.now().toString
+        parsedResponse.payments.head.amountInPence shouldBe 11100
+      }
+
+      "return 401, if user has IR-SA enrolment and auth utr != payload reference " in {
+        grantAccess()
+        stubForShutteringDisabled
+        getNinoAndUTRFromAuth(saUtr = "12345", isSaActive = true)
+        stubForGetPayments(200, paymentsResponseString())
+
+        val request: WSRequest = wsUrl(
+          s"/payments/latest-payments?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.parse(latestPaymentsSelfAssessmentJson)))
+        response.status shouldBe 401
+
+      }
+
+      "return 401, if user has IR-SA enrolment and no utr fetched  " in {
+        grantAccess()
+        stubForShutteringDisabled
+        getNinoAndUTRFromAuth(saUtr = "", isSaActive = true)
+        stubForGetPayments(200, paymentsResponseString())
+
+        val request: WSRequest = wsUrl(
+          s"/payments/latest-payments?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.parse(latestPaymentsSelfAssessmentJson)))
+        response.status shouldBe 401
+
+      }
+
+      "return 401, if user has MTD enrolment only   and no utr fetched via cid connector " in {
+        grantAccess()
+        stubForShutteringDisabled
+        getNinoAndNOUtrInRetreivals(isMtdActive = true)
+        getStubToFetchUtrViaNino(nino.get, "")
+        stubForGetPayments(200, paymentsResponseString())
+
+        val request: WSRequest = wsUrl(
+          s"/payments/latest-payments?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.parse(latestPaymentsSelfAssessmentJson)))
+        response.status shouldBe 401
+
+      }
+
+      "return 404, if no valid payment is returned" in {
+        grantAccess()
+        stubForShutteringDisabled
+        getNinoAndUTRFromAuth(isSaActive = true)
+        stubForGetPayments(200, paymentsResponseString(LocalDate.now().minusDays(15)))
+
+        val request: WSRequest = wsUrl(
+          s"/payments/latest-payments?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.parse(latestPaymentsSelfAssessmentJson)))
+        response.status shouldBe 404
+      }
+
+      "return 404 when a 404 is returned from get payments" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForGetPayments(404)
+        getNinoAndUTRFromAuth(isSaActive = true)
+        val request: WSRequest = wsUrl(
+          s"/payments/latest-payments?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.parse(latestPaymentsSelfAssessmentJson)))
+        response.status shouldBe 404
+      }
+
+      "return 401 when auth fails" in {
+        authorisationRejected()
+
+        val request: WSRequest = wsUrl(
+          s"/payments/latest-payments?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader)
+        val response = await(request.post(Json.parse(latestPaymentsSelfAssessmentJson)))
+        response.status shouldBe 401
+      }
+
+      "return 500 when unknown error 500 returned from get payments" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForGetPayments(500)
+        getNinoAndUTRFromAuth(isSaActive = true)
+
+        val request: WSRequest = wsUrl(
+          s"/payments/latest-payments?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.parse(latestPaymentsSelfAssessmentJson)))
+        response.status shouldBe 500
+      }
+
+      "return 521 when shuttered" in {
+        grantAccess()
+        stubForShutteringEnabled
+
+        val request: WSRequest = wsUrl(
+          s"/payments/latest-payments?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.parse(latestPaymentsSelfAssessmentJson)))
+        response.status shouldBe 521
+      }
+
+      "return 400, bad request when reference is missing from the request" in {
+        grantAccess()
+        stubForShutteringEnabled
+
+        val request: WSRequest = wsUrl(
+          s"/payments/latest-payments?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.parse(malformedSAJson)))
+        response.status shouldBe 521
+      }
+    }
+
+    "taxType = appSimpleAssessment" should {
+
+      "return 200 with the latest payments, auth ref matches request ref" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForGetPayments(200, paymentsResponseString(), "other", "22441133")
+        getNinoAndUTRFromAuth()
+        stubForP800Response(nino, taxYear, "22441133", chargeRef2)
+
+        val request: WSRequest = wsUrl(
+          s"/payments/latest-payments?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.parse(latestPaymentsSimpleAssessmentJson)))
+        response.status shouldBe 200
+        val parsedResponse = Json.parse(response.body).as[LatestPaymentsResponse]
+        parsedResponse.payments.size               shouldBe 2
+        parsedResponse.payments.head.date.toString shouldBe LocalDate.now().toString
+        parsedResponse.payments.head.amountInPence shouldBe 11100
+
+      }
+
+      "return 401 with the latest payments  auth ref don;t match request ref" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForGetPayments(200, paymentsResponseString(), "other", "22441133")
+        getNinoAndUTRFromAuth()
+        stubForP800Response(nino, taxYear, chargeRef1, chargeRef2)
+
+        val request: WSRequest = wsUrl(
+          s"/payments/latest-payments?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.parse(latestPaymentsSimpleAssessmentJson)))
+        response.status shouldBe 401
+
+      }
+
+      "return 404, if no valid payment is returned" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForGetPayments(200, paymentsResponseString(LocalDate.now().minusDays(15)))
+        getNinoAndUTRFromAuth()
+        stubForP800Response(nino, taxYear, "22441133", chargeRef2)
+
+        val request: WSRequest = wsUrl(
+          s"/payments/latest-payments?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.parse(latestPaymentsSimpleAssessmentJson)))
+        response.status shouldBe 404
+      }
+
+      "return 404,  when a 404 is returned from get payments service" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForGetPayments(404, taxType = "other", reference = "22441133")
+        getNinoAndUTRFromAuth()
+        stubForP800Response(nino, taxYear, "22441133", chargeRef2)
+
+        val request: WSRequest = wsUrl(
+          s"/payments/latest-payments?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.parse(latestPaymentsSimpleAssessmentJson)))
+        response.status shouldBe 404
+      }
+
+      "return 401 when auth fails" in {
+        authorisationRejected()
+
+        val request: WSRequest = wsUrl(
+          s"/payments/latest-payments?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader)
+        val response = await(request.post(Json.parse(latestPaymentsSimpleAssessmentJson)))
+        response.status shouldBe 401
+      }
+
+      "return 500 when unknown error 500 returned from get payments" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForGetPayments(500, taxType = "other", reference = "22441133")
+        getNinoAndUTRFromAuth()
+        stubForP800Response(nino, taxYear, "22441133", chargeRef2)
+
+        val request: WSRequest = wsUrl(
+          s"/payments/latest-payments?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.parse(latestPaymentsSimpleAssessmentJson)))
+        response.status shouldBe 500
+      }
+
+      "return 521 when shuttered" in {
+        grantAccess()
+        stubForShutteringEnabled
+
+        val request: WSRequest = wsUrl(
+          s"/payments/latest-payments?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.parse(latestPaymentsSelfAssessmentJson)))
+        response.status shouldBe 521
+      }
+
+      "return 400, bad request when reference is missing from the request" in {
+        grantAccess()
+        stubForShutteringDisabled
+
+        val request: WSRequest = wsUrl(
+          s"/payments/latest-payments?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.parse(malformedSimpleJson)))
+        response.status shouldBe 400
+      }
 
     }
 
-    "return 401 with the latest payments when taxType = appSelfAssessment and auth utr don't matches req utr" in {
-      grantAccess()
-      stubForShutteringDisabled
-      stubForGetPayments(200, paymentsResponseString())
-      getUTRFromAuth("1234567")
-      getNinoFromAuth()
+    "taxType = BLANK" should {
 
-      val request: WSRequest = wsUrl(
-        s"/payments/latest-payments?journeyId=$journeyId"
-      ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
-      val response = await(request.post(Json.parse(latestPaymentsSelfAssessmentJson)))
-      response.status shouldBe 401
+      "400, bad request  as malformed json" in {
+        grantAccess()
+        stubForShutteringDisabled
 
-    }
-
-    "return 200 with the latest payments when taxType = appSimpleAssessment, auth ref matches request ref" in {
-      grantAccess()
-      stubForShutteringDisabled
-      stubForGetPayments(200, paymentsResponseString(), "other", "22441133")
-      getUTRFromAuth("22441133")
-      getNinoFromAuth()
-      stubForP800Response(nino, taxYear, "22441133", chargeRef2)
-
-      val request: WSRequest = wsUrl(
-        s"/payments/latest-payments?journeyId=$journeyId"
-      ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
-      val response = await(request.post(Json.parse(latestPaymentsSimpleAssessmentJson)))
-      response.status shouldBe 200
-      val parsedResponse = Json.parse(response.body).as[LatestPaymentsResponse]
-      parsedResponse.payments.size               shouldBe 2
-      parsedResponse.payments.head.date.toString shouldBe LocalDate.now().toString
-      parsedResponse.payments.head.amountInPence shouldBe 11100
-
-    }
-
-    "return 401 with the latest payments when taxType = appSimpleAssessment and auth ref don;t match request ref" in {
-      grantAccess()
-      stubForShutteringDisabled
-      stubForGetPayments(200, paymentsResponseString(), "other", "22441133")
-      getUTRFromAuth("22441133")
-      getNinoFromAuth()
-      stubForP800Response(nino, taxYear, chargeRef1, chargeRef2)
-
-      val request: WSRequest = wsUrl(
-        s"/payments/latest-payments?journeyId=$journeyId"
-      ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
-      val response = await(request.post(Json.parse(latestPaymentsSimpleAssessmentJson)))
-      response.status shouldBe 401
-
-    }
-
-    "return 404 when no valid payments returned" in {
-      grantAccess()
-      stubForShutteringDisabled
-      stubForGetPayments(200, paymentsResponseString(LocalDate.now().minusDays(15)))
-      getUTRFromAuth("1122334455")
-      getNinoFromAuth()
-      val request: WSRequest = wsUrl(
-        s"/payments/latest-payments?journeyId=$journeyId"
-      ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
-      val response = await(request.post(Json.parse(latestPaymentsSelfAssessmentJson)))
-      response.status shouldBe 404
-
-    }
-
-    "return 404 when a 404 is returned from get payments" in {
-      grantAccess()
-      stubForShutteringDisabled
-      stubForGetPayments(404)
-      getUTRFromAuth("1122334455")
-      getNinoFromAuth()
-      val request: WSRequest = wsUrl(
-        s"/payments/latest-payments?journeyId=$journeyId"
-      ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
-      val response = await(request.post(Json.parse(latestPaymentsSelfAssessmentJson)))
-      response.status shouldBe 404
-    }
-
-    "return 401 when auth fails" in {
-      authorisationRejected()
-
-      val request: WSRequest = wsUrl(
-        s"/payments/latest-payments?journeyId=$journeyId"
-      ).addHttpHeaders(acceptJsonHeader)
-      val response = await(request.post(Json.parse(latestPaymentsSelfAssessmentJson)))
-      response.status shouldBe 401
-    }
-
-    "return 500 when a 401 is returned from get payments" in {
-      grantAccess()
-      stubForShutteringDisabled
-      stubForGetPayments(401)
-      getUTRFromAuth("1122334455")
-      getNinoFromAuth()
-
-      val request: WSRequest = wsUrl(
-        s"/payments/latest-payments?journeyId=$journeyId"
-      ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
-      val response = await(request.post(Json.parse(latestPaymentsSelfAssessmentJson)))
-      response.status shouldBe 500
-    }
-
-    "return 500 when unknown error 500 returned from get payments" in {
-      grantAccess()
-      stubForShutteringDisabled
-      stubForGetPayments(500)
-      getUTRFromAuth("1122334455")
-      getNinoFromAuth()
-
-      val request: WSRequest = wsUrl(
-        s"/payments/latest-payments?journeyId=$journeyId"
-      ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
-      val response = await(request.post(Json.parse(latestPaymentsSelfAssessmentJson)))
-      response.status shouldBe 500
-    }
-
-    "return 521 when shuttered" in {
-      grantAccess()
-      stubForShutteringEnabled
-
-      val request: WSRequest = wsUrl(
-        s"/payments/latest-payments?journeyId=$journeyId"
-      ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
-      val response = await(request.post(Json.parse(latestPaymentsSelfAssessmentJson)))
-      response.status shouldBe 521
+        val request: WSRequest = wsUrl(
+          s"/payments/latest-payments?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.parse(malformedJson)))
+        response.status shouldBe 400
+      }
     }
   }
 
-  "GET /payments/pay-by-card" should {
-    "return 200 with the pay by card url without the domain prefix when the taxType is set to appSelfAssessment" in {
-      grantAccess()
-      stubForShutteringDisabled
-      getNinoFromAuth()
-      stubForPayByCard(200, payApiPayByCardResponseJson)
-      getUTRFromAuth(utr)
+  "GET /payments/pay-by-card" when {
 
-      val request: WSRequest = wsUrl(
-        s"/payments/pay-by-card?journeyId=$journeyId"
-      ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader, sessionIdHeader)
-      val response =
-        await(request.post(Json.obj("amountInPence" -> 100000, "taxType" -> "appSelfAssessment", "reference" -> utr)))
-      response.status shouldBe 200
-      val parsedResponse = Json.parse(response.body).as[PayByCardResponse]
-      parsedResponse.payByCardUrl shouldBe "/pay/initiate-journey?traceId=83303543"
+    "type = appSelfAssessment" should {
+
+      "return 200, if user has IR-SA enrolment and auth utr == payload reference" in {
+        grantAccess()
+        stubForShutteringDisabled
+        getNinoAndUTRFromAuth(isSaActive = true)
+        stubForPayByCard(200, payApiPayByCardResponseJson)
+
+        val request: WSRequest = wsUrl(
+          s"/payments/pay-by-card?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader, sessionIdHeader)
+        val response =
+          await(request.post(Json.obj("amountInPence" -> 100000, "taxType" -> "appSelfAssessment", "reference" -> utr)))
+        response.status shouldBe 200
+        val parsedResponse = Json.parse(response.body).as[PayByCardResponse]
+        parsedResponse.payByCardUrl shouldBe "/pay/initiate-journey?traceId=83303543"
+      }
+
+      "return 200, if user has IR-SA And MTD enrolments  and auth utr == payload reference" in {
+        grantAccess()
+        stubForShutteringDisabled
+        getNinoAndUTRFromAuth(isSaActive = true, isMtdActive = true)
+        stubForPayByCard(200, payApiPayByCardResponseJson)
+
+        val request: WSRequest = wsUrl(
+          s"/payments/pay-by-card?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader, sessionIdHeader)
+        val response =
+          await(request.post(Json.obj("amountInPence" -> 100000, "taxType" -> "appSelfAssessment", "reference" -> utr)))
+        response.status shouldBe 200
+        val parsedResponse = Json.parse(response.body).as[PayByCardResponse]
+        parsedResponse.payByCardUrl shouldBe "/pay/initiate-journey?traceId=83303543"
+      }
+
+      "return 200, if user has only MTD enrolments ,utr is fetched via cid and fetched utr == payload reference" in {
+        grantAccess()
+        stubForShutteringDisabled
+        getNinoAndNOUtrInRetreivals(isMtdActive = true)
+        getStubToFetchUtrViaNino(nino.get, utr)
+        stubForPayByCard(200, payApiPayByCardResponseJson)
+
+        val request: WSRequest = wsUrl(
+          s"/payments/pay-by-card?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader, sessionIdHeader)
+        val response =
+          await(request.post(Json.obj("amountInPence" -> 100000, "taxType" -> "appSelfAssessment", "reference" -> utr)))
+        response.status shouldBe 200
+        val parsedResponse = Json.parse(response.body).as[PayByCardResponse]
+        parsedResponse.payByCardUrl shouldBe "/pay/initiate-journey?traceId=83303543"
+      }
+
+      "return 200, if user has only MTD enrolments ,but utr is there in retrievals and fetched utr == payload reference" in {
+        grantAccess()
+        stubForShutteringDisabled
+        getNinoAndUTRFromAuth(isMtdActive = true)
+        getStubToFetchUtrViaNino(nino.get, utr)
+        stubForPayByCard(200, payApiPayByCardResponseJson)
+
+        val request: WSRequest = wsUrl(
+          s"/payments/pay-by-card?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader, sessionIdHeader)
+        val response =
+          await(request.post(Json.obj("amountInPence" -> 100000, "taxType" -> "appSelfAssessment", "reference" -> utr)))
+        response.status shouldBe 200
+        val parsedResponse = Json.parse(response.body).as[PayByCardResponse]
+        parsedResponse.payByCardUrl shouldBe "/pay/initiate-journey?traceId=83303543"
+      }
+
+      "return 401, if user has has IR-SA enrolment and auth utr != payload reference" in {
+        grantAccess()
+        stubForShutteringDisabled
+        getNinoAndUTRFromAuth(saUtr = "12345", isSaActive = true)
+        stubForPayByCard(200, payApiPayByCardResponseJson)
+
+        val request: WSRequest = wsUrl(
+          s"/payments/pay-by-card?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader, sessionIdHeader)
+        val response =
+          await(request.post(Json.obj("amountInPence" -> 100000, "taxType" -> "appSelfAssessment", "reference" -> utr)))
+        response.status shouldBe 401
+      }
+
+      "return 401, if user has IR-SA enrolment and no utr fetched " in {
+        grantAccess()
+        stubForShutteringDisabled
+        getNinoAndUTRFromAuth(saUtr = "", isSaActive = true)
+        stubForPayByCard(200, payApiPayByCardResponseJson)
+
+        val request: WSRequest = wsUrl(
+          s"/payments/pay-by-card?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader, sessionIdHeader)
+        val response =
+          await(request.post(Json.obj("amountInPence" -> 100000, "taxType" -> "appSelfAssessment", "reference" -> utr)))
+        response.status shouldBe 401
+      }
+
+      "return 401, if user has MTD enrolment only and no utr fetched via cid connector " in {
+        grantAccess()
+        stubForShutteringDisabled
+        getNinoAndNOUtrInRetreivals(isMtdActive = true)
+        getStubToFetchUtrViaNino(nino.get, "")
+        stubForPayByCard(200, payApiPayByCardResponseJson)
+
+        val request: WSRequest = wsUrl(
+          s"/payments/pay-by-card?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader, sessionIdHeader)
+        val response =
+          await(request.post(Json.obj("amountInPence" -> 100000, "taxType" -> "appSelfAssessment", "reference" -> utr)))
+        response.status shouldBe 401
+      }
+
+      "return 404, if service return 404" in {
+        grantAccess()
+        stubForShutteringDisabled
+        getNinoAndUTRFromAuth(isSaActive = true)
+        stubForPayByCard(404)
+
+        val request: WSRequest = wsUrl(
+          s"/payments/pay-by-card?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader, sessionIdHeader)
+        val response =
+          await(request.post(Json.obj("amountInPence" -> 100000, "taxType" -> "appSelfAssessment", "reference" -> utr)))
+        response.status shouldBe 404
+      }
+
+      "return 401, if auth fails" in {
+        authorisationRejected()
+
+        val request: WSRequest = wsUrl(
+          s"/payments/pay-by-card?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader, sessionIdHeader)
+        val response =
+          await(request.post(Json.obj("amountInPence" -> 100000, "taxType" -> "appSelfAssessment", "reference" -> utr)))
+        response.status shouldBe 401
+      }
+
+      "return 500 when unknown error 500 returned from get payments" in {
+        grantAccess()
+        stubForShutteringDisabled
+        getNinoAndUTRFromAuth(isSaActive = true)
+        stubForPayByCard(500)
+
+        val request: WSRequest = wsUrl(
+          s"/payments/pay-by-card?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader, sessionIdHeader)
+        val response =
+          await(request.post(Json.obj("amountInPence" -> 100000, "taxType" -> "appSelfAssessment", "reference" -> utr)))
+        response.status shouldBe 500
+      }
+
+      "return 521 when shuttered" in {
+        grantAccess()
+        stubForShutteringEnabled
+
+        val request: WSRequest = wsUrl(
+          s"/payments/pay-by-card?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader, sessionIdHeader)
+        val response =
+          await(request.post(Json.obj("amountInPence" -> 100000, "taxType" -> "appSelfAssessment", "reference" -> utr)))
+        response.status shouldBe 521
+      }
+
+      "return 400, bad request " when {
+
+        "reference is missing from the request" in {
+          grantAccess()
+          stubForShutteringDisabled
+
+          val request: WSRequest = wsUrl(
+            s"/payments/pay-by-card?journeyId=$journeyId"
+          ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader, sessionIdHeader)
+          val response =
+            await(request.post(Json.obj("amountInPence" -> 100000, "taxType" -> "appSelfAssessment")))
+          response.status shouldBe 400
+        }
+
+        "amountInPence is missing from the request" in {
+          grantAccess()
+          stubForShutteringDisabled
+
+          val request: WSRequest = wsUrl(
+            s"/payments/pay-by-card?journeyId=$journeyId"
+          ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader, sessionIdHeader)
+          val response =
+            await(request.post(Json.obj("taxType" -> "appSelfAssessment", "reference" -> utr)))
+          response.status shouldBe 400
+        }
+
+      }
 
     }
 
-//    "return 200 with the pay by card url without the domain prefix when the taxType is set to appSimpleAssessment" in {
-//      grantAccess()
-//      stubForShutteringDisabled
-//      getNinoFromAuth()
-//      stubForPayByCardSimpleAssessment(200, payApiPayByCardResponseJson)
-//
-//      val request: WSRequest = wsUrl(
-//        s"/payments/pay-by-card?journeyId=$journeyId"
-//      ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader, sessionIdHeader)
-//      val response = await(
-//        request.post(
-//          Json.obj("amountInPence" -> 100000, "taxType" -> "appSimpleAssessment", "taxYear" -> 2023, "reference" -> "12345678")
-//        )
-//      )
-//      response.status shouldBe 200
-//      val parsedResponse = Json.parse(response.body).as[PayByCardResponse]
-//      parsedResponse.payByCardUrl shouldBe "/pay/initiate-journey?traceId=83303543"
-//    }
+    "type = appSimpleAssessment" should {
 
-//    "return 404 when a 404 is returned from payments" in {
-//      grantAccess()
-//      stubForShutteringDisabled
-//      getNinoFromAuth()
-//      stubForPayByCardSimpleAssessment(404)
-//
-//      val request: WSRequest = wsUrl(
-//        s"/payments/pay-by-card?journeyId=$journeyId"
-//      ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader)
-//      val response = await(
-//        request.post(
-//          Json.obj("amountInPence" -> 100000, "taxType" -> "appSimpleAssessment", "taxYear" -> 2023, "reference" -> utr)
-//        )
-//      )
-//      response.status shouldBe 404
-//    }
+      "return 200, if request reference == logged in use charge reference" in {
 
-//    "return 401 when auth fails" in {
-//      authorisationRejected()
-//
-//      val request: WSRequest = wsUrl(
-//        s"/payments/pay-by-card?journeyId=$journeyId"
-//      ).addHttpHeaders(acceptJsonHeader)
-//      val response = await(
-//        request.post(
-//          Json.obj("amountInPence" -> 100000, "taxType" -> "appSimpleAssessment", "taxYear" -> 2023, "reference" -> utr)
-//        )
-//      )
-//      response.status shouldBe 401
-//    }
+        grantAccess()
+        stubForShutteringDisabled
+        getNinoAndUTRFromAuth()
+        stubForP800Response(nino, taxYear, "12345678", chargeRef2)
+        stubForPayByCardSimpleAssessment(200, payApiPayByCardResponseJson)
 
-    "return 401 when a 401 is returned from payments" in {
-      grantAccess()
-      stubForShutteringDisabled
-      getNinoFromAuth()
-      stubForPayByCard(401)
-      getUTRFromAuth(utr)
+        val request: WSRequest = wsUrl(
+          s"/payments/pay-by-card?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader, sessionIdHeader)
+        val response = await(
+          request.post(
+            Json.obj("amountInPence" -> 100000, "taxType" -> "appSimpleAssessment", "taxYear" -> 2023, "reference" -> "12345678")
+          )
+        )
+        response.status shouldBe 200
+        val parsedResponse = Json.parse(response.body).as[PayByCardResponse]
+        parsedResponse.payByCardUrl shouldBe "/pay/initiate-journey?traceId=83303543"
+      }
 
-      val request: WSRequest = wsUrl(
-        s"/payments/pay-by-card?journeyId=$journeyId"
-      ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader)
-      val response =
-        await(request.post(Json.obj("amountInPence" -> 100000, "taxType" -> "appSelfAssessment", "reference" -> utr)))
-      response.status shouldBe 401
+      "return 401 , if auth charge ref != request ref" in {
+
+        grantAccess()
+        stubForShutteringDisabled
+        getNinoAndUTRFromAuth()
+        stubForP800Response(nino, taxYear, "11223344", chargeRef2)
+        stubForPayByCardSimpleAssessment(200, payApiPayByCardResponseJson)
+
+        val request: WSRequest = wsUrl(
+          s"/payments/pay-by-card?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader, sessionIdHeader)
+        val response = await(
+          request.post(
+            Json.obj("amountInPence" -> 100000, "taxType" -> "appSimpleAssessment", "taxYear" -> 2023, "reference" -> "12345678")
+          )
+        )
+        response.status shouldBe 401
+      }
+
+      "return 401, if auth fails" in {
+        authorisationRejected()
+
+        val request: WSRequest = wsUrl(
+          s"/payments/pay-by-card?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader, sessionIdHeader)
+        val response = await(
+          request.post(
+            Json.obj("amountInPence" -> 100000, "taxType" -> "appSimpleAssessment", "taxYear" -> 2023, "reference" -> "12345678")
+          )
+        )
+        response.status shouldBe 401
+      }
+
+      "return 404, if service return 404" in {
+        grantAccess()
+        stubForShutteringDisabled
+        getNinoAndUTRFromAuth()
+        stubForP800Response(nino, taxYear, "12345678", chargeRef2)
+        stubForPayByCardSimpleAssessment(404)
+
+        val request: WSRequest = wsUrl(
+          s"/payments/pay-by-card?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader, sessionIdHeader)
+        val response = await(
+          request.post(
+            Json.obj("amountInPence" -> 100000, "taxType" -> "appSimpleAssessment", "taxYear" -> 2023, "reference" -> "12345678")
+          )
+        )
+        response.status shouldBe 404
+      }
+
+      "return 500 when unknown error 500 returned from  payments wesrvice" in {
+        grantAccess()
+        stubForShutteringDisabled
+        getNinoAndUTRFromAuth()
+        stubForP800Response(nino, taxYear, "12345678", chargeRef2)
+        stubForPayByCardSimpleAssessment(500)
+
+        val request: WSRequest = wsUrl(
+          s"/payments/pay-by-card?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader, sessionIdHeader)
+        val response = await(
+          request.post(
+            Json.obj("amountInPence" -> 100000, "taxType" -> "appSimpleAssessment", "taxYear" -> 2023, "reference" -> "12345678")
+          )
+        )
+        response.status shouldBe 500
+      }
+
+      "return 521 when shuttered" in {
+        grantAccess()
+        stubForShutteringEnabled
+
+        val request: WSRequest = wsUrl(
+          s"/payments/pay-by-card?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader, sessionIdHeader)
+        val response = await(
+          request.post(
+            Json.obj("amountInPence" -> 100000, "taxType" -> "appSimpleAssessment", "taxYear" -> 2023, "reference" -> "12345678")
+          )
+        )
+        response.status shouldBe 521
+      }
+
+      "return 400, bad request " when {
+
+        "reference is missing from the request" in {
+          grantAccess()
+          stubForShutteringDisabled
+
+          val request: WSRequest = wsUrl(
+            s"/payments/pay-by-card?journeyId=$journeyId"
+          ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader, sessionIdHeader)
+
+          val response = await(
+            request.post(
+              Json.obj("amountInPence" -> 100000, "taxType" -> "appSimpleAssessment", "taxYear" -> 2024)
+            )
+          )
+          response.status shouldBe 400
+        }
+
+        "amountInPence is missing from the request" in {
+          grantAccess()
+          stubForShutteringDisabled
+
+          val request: WSRequest = wsUrl(
+            s"/payments/pay-by-card?journeyId=$journeyId"
+          ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader, sessionIdHeader)
+
+          val response = await(
+            request.post(
+              Json.obj("taxType" -> "appSimpleAssessment", "taxYear" -> 2024, "reference" -> utr)
+            )
+          )
+          response.status shouldBe 400
+        }
+      }
     }
 
-    "return 500 when unknown error 500 returned from payments" in {
-      grantAccess()
-      stubForShutteringDisabled
-      getNinoFromAuth()
-      stubForPayByCard(500)
-      getUTRFromAuth(utr)
+    "type = BLANK" should {
 
-      val request: WSRequest = wsUrl(
-        s"/payments/pay-by-card?journeyId=$journeyId"
-      ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader)
-      val response =
-        await(request.post(Json.obj("amountInPence" -> 100000, "taxType" -> "appSelfAssessment", "reference" -> utr)))
-      response.status shouldBe 500
-    }
+      "return 400, bad request ,malformed json" in {
 
-    "return 521 when shuttered" in {
-      grantAccess()
-      stubForShutteringEnabled
+        grantAccess()
+        stubForShutteringDisabled
 
-      val request: WSRequest = wsUrl(
-        s"/payments/pay-by-card/?journeyId=$journeyId"
-      ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader)
-      val response =
-        await(request.post(Json.obj("amountInPence" -> 100000, "taxType" -> "appSelfAssessment", "reference" -> utr)))
-      response.status shouldBe 521
+        val request: WSRequest = wsUrl(
+          s"/payments/pay-by-card?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, authorisationJsonHeader, sessionIdHeader)
+        val response =
+          await(request.post(Json.obj("amountInPence" -> 100000, "taxType" -> "", "reference" -> "123456")))
+        response.status shouldBe 400
+
+      }
     }
   }
 }

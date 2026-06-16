@@ -9,6 +9,7 @@ import uk.gov.hmrc.mobilepayments.MobilePaymentsTestData
 import uk.gov.hmrc.mobilepayments.domain.dto.response.SessionDataResponse
 import utils.BaseISpec
 import play.api.libs.ws.writeableOf_JsValue
+import stubs.CidStub.*
 import stubs.P800Stub.stubForP800Response
 import uk.gov.hmrc.mobilepayments.models.openBanking.response.CreateSessionDataResponse
 
@@ -16,174 +17,419 @@ import java.time.LocalDate
 
 class LiveSessionControllerISpec extends BaseISpec with MobilePaymentsTestData {
 
-  "POST /sessions" should {
-    "return 200 when payload is valid and taxType not supplied" in {
-      grantAccess()
-      stubForShutteringDisabled
-      stubForCreateSession(response = createSessionDataResponseJson)
-      getUTRFromAuth()
-      getNinoFromAuth()
+  "POST /sessions" when {
+    val utr: String = "1122334455"
+    "taxType = appSelfAssessment" should {
 
-      val request: WSRequest = wsUrl(
-        s"/sessions?journeyId=$journeyId"
-      ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
-      val response = await(request.post(Json.obj("amount" -> 1200, "saUtr" -> "CS700100A")))
-      response.status shouldBe 200
-      val parsedResponse = Json.parse(response.body).as[CreateSessionDataResponse]
-      parsedResponse.sessionDataId.value shouldBe "51cc67d6-21da-11ec-9621-0242ac130002"
+      "return 200, if user has IR-SA enrolment and auth utr == payload reference == request sautr" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForCreateSession(response    = createSessionDataResponseJson)
+        getNinoAndUTRFromAuth(isSaActive = true)
+
+        val request: WSRequest = wsUrl(
+          s"/sessions?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.obj("amountInPence" -> 1200, "reference" -> utr, "taxType" -> "appSelfAssessment")))
+        response.status shouldBe 200
+        val parsedResponse = Json.parse(response.body).as[CreateSessionDataResponse]
+        parsedResponse.sessionDataId.value shouldBe "51cc67d6-21da-11ec-9621-0242ac130002"
+      }
+
+      "return 200, if user has IR-SA And MTD enrolments  and auth utr == payload reference == request sautr" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForCreateSession(response    = createSessionDataResponseJson)
+        getNinoAndUTRFromAuth(isSaActive = true, isMtdActive = true)
+
+        val request: WSRequest = wsUrl(
+          s"/sessions?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.obj("amountInPence" -> 1200, "reference" -> utr, "taxType" -> "appSelfAssessment")))
+        response.status shouldBe 200
+        val parsedResponse = Json.parse(response.body).as[CreateSessionDataResponse]
+        parsedResponse.sessionDataId.value shouldBe "51cc67d6-21da-11ec-9621-0242ac130002"
+      }
+
+      "return 200, if user has only MTD enrolments ,utr is fetched via cid and fetched utr == payload reference = request sautr" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForCreateSession(response           = createSessionDataResponseJson)
+        getNinoAndNOUtrInRetreivals(isMtdActive = true)
+        getStubToFetchUtrViaNino(nino.get, utr)
+
+        val request: WSRequest = wsUrl(
+          s"/sessions?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.obj("amountInPence" -> 1200, "reference" -> utr, "taxType" -> "appSelfAssessment")))
+        response.status shouldBe 200
+        val parsedResponse = Json.parse(response.body).as[CreateSessionDataResponse]
+        parsedResponse.sessionDataId.value shouldBe "51cc67d6-21da-11ec-9621-0242ac130002"
+      }
+
+      "return 200, if user has only MTD enrolments ,but utr is there in retrievals and fetched utr == payload reference" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForCreateSession(response     = createSessionDataResponseJson)
+        getNinoAndUTRFromAuth(isMtdActive = true)
+        getStubToFetchUtrViaNino(nino.get, utr)
+
+        val request: WSRequest = wsUrl(
+          s"/sessions?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.obj("amountInPence" -> 1200, "reference" -> utr, "taxType" -> "appSelfAssessment")))
+        response.status shouldBe 200
+        val parsedResponse = Json.parse(response.body).as[CreateSessionDataResponse]
+        parsedResponse.sessionDataId.value shouldBe "51cc67d6-21da-11ec-9621-0242ac130002"
+      }
+
+      "return 401, if user has any enrolment , but request sautr != request reference" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForCreateSession(response    = createSessionDataResponseJson)
+        getNinoAndUTRFromAuth(isSaActive = true, isMtdActive = true)
+
+        val request: WSRequest = wsUrl(
+          s"/sessions?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.obj("amountInPence" -> 1200, "reference" -> utr, "taxType" -> "appSelfAssessment", "saUtr" -> "123")))
+        response.status shouldBe 401
+      }
+
+      "return 401, if user has any enrolment and  request sautr == request reference, but != auth sautr" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForCreateSession(response    = createSessionDataResponseJson)
+        getNinoAndUTRFromAuth(isSaActive = true, isMtdActive = true, saUtr = "12344321")
+
+        val request: WSRequest = wsUrl(
+          s"/sessions?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.obj("amountInPence" -> 1200, "reference" -> utr, "taxType" -> "appSelfAssessment", "saUtr" -> utr)))
+        response.status shouldBe 401
+      }
+
+      "return 401, if user has any enrolment and auth sautr != request reference, but matches request saUtr" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForCreateSession(response    = createSessionDataResponseJson)
+        getNinoAndUTRFromAuth(isSaActive = true, isMtdActive = true)
+
+        val request: WSRequest = wsUrl(
+          s"/sessions?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response =
+          await(request.post(Json.obj("amountInPence" -> 1200, "reference" -> "1234321", "taxType" -> "appSelfAssessment", "saUtr" -> utr)))
+        response.status shouldBe 401
+      }
+
+      "return 401 , if no utr is fetched via auth call for IR-SA enrolemnt" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForCreateSession(response    = createSessionDataResponseJson)
+        getNinoAndUTRFromAuth(isSaActive = true, saUtr = "")
+
+        val request: WSRequest = wsUrl(
+          s"/sessions?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response =
+          await(request.post(Json.obj("amountInPence" -> 1200, "reference" -> utr, "taxType" -> "appSelfAssessment", "saUtr" -> utr)))
+        response.status shouldBe 401
+      }
+
+      "return 401, if user has MTD enrolment only and no utr fetched via cid connector " in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForCreateSession(response           = createSessionDataResponseJson)
+        getNinoAndNOUtrInRetreivals(isMtdActive = true)
+        getStubToFetchUtrViaNino(nino.get, "")
+
+        val request: WSRequest = wsUrl(
+          s"/sessions?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response =
+          await(request.post(Json.obj("amountInPence" -> 1200, "reference" -> utr, "taxType" -> "appSelfAssessment", "saUtr" -> utr)))
+        response.status shouldBe 401
+      }
+
+      "return 404, iof service return 404" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForCreateSession(401)
+        getNinoAndNOUtrInRetreivals(isSaActive = true)
+
+        val request: WSRequest = wsUrl(
+          s"/sessions?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response =
+          await(request.post(Json.obj("amountInPence" -> 1200, "reference" -> utr, "taxType" -> "appSelfAssessment", "saUtr" -> utr)))
+        response.status shouldBe 401
+      }
+
+      "return 401, if auth fails" in {
+        authorisationRejected()
+        val request: WSRequest = wsUrl(
+          s"/sessions?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response =
+          await(request.post(Json.obj("amountInPence" -> 1200, "reference" -> utr, "taxType" -> "appSelfAssessment", "saUtr" -> utr)))
+        response.status shouldBe 401
+      }
+
+      "return 500 when service returns 5XX" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForCreateSession(500)
+        getNinoAndUTRFromAuth(isSaActive = true)
+
+        val request: WSRequest = wsUrl(
+          s"/sessions?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.obj("amountInPence" -> 1200, "reference" -> utr, "taxType" -> "appSelfAssessment")))
+        response.status shouldBe 500
+      }
+
+      "return 521 when shuttered" in {
+        grantAccess()
+        stubForShutteringEnabled
+
+        val request: WSRequest = wsUrl(
+          s"/sessions?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.obj("amountInPence" -> 1200, "reference" -> utr, "taxType" -> "appSelfAssessment")))
+        response.status shouldBe 521
+      }
+
+      "return 400, bad request " when {
+
+        "amountInPence is missing" in {
+          grantAccess()
+          stubForShutteringDisabled
+          getNinoAndUTRFromAuth(isSaActive = true)
+
+          val request: WSRequest = wsUrl(
+            s"/sessions?journeyId=$journeyId"
+          ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+          val response = await(request.post(Json.obj("reference" -> utr, "taxType" -> "appSelfAssessment")))
+          response.status shouldBe 400
+        }
+        "reference is missing" in {
+          grantAccess()
+          stubForShutteringDisabled
+          stubForCreateSession(response    = createSessionDataResponseJson)
+          getNinoAndUTRFromAuth(isSaActive = true)
+
+          val request: WSRequest = wsUrl(
+            s"/sessions?journeyId=$journeyId"
+          ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+          val response = await(request.post(Json.obj("amountInPence" -> 1200, "taxType" -> "appSelfAssessment")))
+          response.status shouldBe 400
+        }
+      }
     }
 
-    "return 200 when payload is valid and the taxType is set to appSelfAssessment" in {
-      grantAccess()
-      stubForShutteringDisabled
-      stubForCreateSession(response = createSessionDataResponseJson)
-      getUTRFromAuth()
-      getNinoFromAuth()
+    "taxType = appSimpleAssessment" should {
 
-      val request: WSRequest = wsUrl(
-        s"/sessions?journeyId=$journeyId"
-      ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
-      val response = await(
-        request.post(Json.obj("amountInPence" -> 1200, "reference" -> "CS700100A", "taxType" -> "appSelfAssessment"))
-      )
-      response.status shouldBe 200
-      val parsedResponse = Json.parse(response.body).as[CreateSessionDataResponse]
-      parsedResponse.sessionDataId.value shouldBe "51cc67d6-21da-11ec-9621-0242ac130002"
-    }
+      "return 200, if request reference == logged in use charge reference " in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForCreateSession(response = createSessionDataResponseJson)
+        getNinoAndUTRFromAuth()
+        stubForP800Response(nino, taxYear, chargeRef1, chargeRef2)
 
-    "return 401 when taxType is set to appSelfAssessment and reference don;t match auth utr" in {
-      grantAccess()
-      stubForShutteringDisabled
-      stubForCreateSession(response = createSessionDataResponseJson)
-      getUTRFromAuth()
-      getNinoFromAuth()
-
-      val request: WSRequest = wsUrl(
-        s"/sessions?journeyId=$journeyId"
-      ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
-      val response = await(
-        request.post(Json.obj("amountInPence" -> 1200, "reference" -> "1234", "taxType" -> "appSelfAssessment"))
-      )
-      response.status shouldBe 401
-
-    }
-
-    "return 200 when payload is valid and the taxType is set to appSimpleAssessment" in {
-      grantAccess()
-      stubForShutteringDisabled
-      stubForCreateSession(response = createSessionDataResponseJson)
-      getUTRFromAuth()
-      getNinoFromAuth()
-      stubForP800Response(nino, taxYear, chargeRef1, chargeRef2)
-
-      val request: WSRequest = wsUrl(
-        s"/sessions?journeyId=$journeyId"
-      ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
-      val response = await(
-        request.post(Json.obj("amountInPence" -> 1200, "reference" -> chargeRef1, "taxType" -> "appSimpleAssessment"))
-      )
-      response.status shouldBe 200
-      val parsedResponse = Json.parse(response.body).as[CreateSessionDataResponse]
-      parsedResponse.sessionDataId.value shouldBe "51cc67d6-21da-11ec-9621-0242ac130002"
-    }
-
-    "return 401 when  taxType = appSimpleAssessment but request reference don't match auth reference" in {
-      grantAccess()
-      stubForShutteringDisabled
-      getUTRFromAuth()
-      getNinoFromAuth()
-      stubForP800Response(nino, taxYear, chargeRef1, chargeRef2)
-
-      val request: WSRequest = wsUrl(
-        s"/sessions?journeyId=$journeyId"
-      ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
-      val response = await(
-        request.post(
-          Json.obj("amountInPence" -> 1200,
-                   "reference" ->
-                     "1234",
-                   "taxType" -> "appSimpleAssessment"
-                  )
+        val request: WSRequest = wsUrl(
+          s"/sessions?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(
+          request.post(Json.obj("amountInPence" -> 1200, "reference" -> chargeRef1, "taxType" -> "appSimpleAssessment"))
         )
-      )
-      response.status shouldBe 401
+        response.status shouldBe 200
+        val parsedResponse = Json.parse(response.body).as[CreateSessionDataResponse]
+        parsedResponse.sessionDataId.value shouldBe "51cc67d6-21da-11ec-9621-0242ac130002"
+      }
 
+      "return 401 , if auth charge ref != request ref" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForCreateSession(response = createSessionDataResponseJson)
+        getNinoAndUTRFromAuth()
+        stubForP800Response(nino, taxYear, "12345", chargeRef2)
+
+        val request: WSRequest = wsUrl(
+          s"/sessions?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(
+          request.post(Json.obj("amountInPence" -> 1200, "reference" -> chargeRef1, "taxType" -> "appSimpleAssessment"))
+        )
+        response.status shouldBe 401
+      }
+
+      "return 401 if the service returns 401" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForCreateSession(401)
+        getNinoAndUTRFromAuth()
+        stubForP800Response(nino, taxYear, chargeRef1, chargeRef2)
+
+        val request: WSRequest = wsUrl(
+          s"/sessions?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(
+          request.post(Json.obj("amountInPence" -> 1200, "reference" -> chargeRef1, "taxType" -> "appSimpleAssessment"))
+        )
+        response.status shouldBe 401
+      }
+
+      "return 401, if auth fails" in {
+        authorisationRejected()
+
+        val request: WSRequest = wsUrl(
+          s"/sessions?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(
+          request.post(Json.obj("amountInPence" -> 1200, "reference" -> chargeRef1, "taxType" -> "appSimpleAssessment"))
+        )
+        response.status shouldBe 401
+      }
+
+      "return 404, if service return 404" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForCreateSession(404)
+        getNinoAndUTRFromAuth()
+        stubForP800Response(nino, taxYear, chargeRef1, chargeRef2)
+
+        val request: WSRequest = wsUrl(
+          s"/sessions?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(
+          request.post(Json.obj("amountInPence" -> 1200, "reference" -> chargeRef1, "taxType" -> "appSimpleAssessment"))
+        )
+        response.status shouldBe 404
+      }
+
+      "return 500, if service returns 500" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForCreateSession(500)
+        getNinoAndUTRFromAuth()
+        stubForP800Response(nino, taxYear, chargeRef1, chargeRef2)
+
+        val request: WSRequest = wsUrl(
+          s"/sessions?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(
+          request.post(Json.obj("amountInPence" -> 1200, "reference" -> chargeRef1, "taxType" -> "appSimpleAssessment"))
+        )
+        response.status shouldBe 500
+      }
+
+      "return 521, if service is shuttered" in {
+        grantAccess()
+        stubForShutteringEnabled
+
+        val request: WSRequest = wsUrl(
+          s"/sessions?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(
+          request.post(Json.obj("amountInPence" -> 1200, "reference" -> chargeRef1, "taxType" -> "appSimpleAssessment"))
+        )
+        response.status shouldBe 521
+      }
+
+      "return 400, bad request " when {
+
+        "reference is missing from the request" in {
+          grantAccess()
+          stubForShutteringDisabled
+          getNinoAndUTRFromAuth()
+          stubForP800Response(nino, taxYear, chargeRef1, chargeRef2)
+
+          val request: WSRequest = wsUrl(
+            s"/sessions?journeyId=$journeyId"
+          ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+          val response = await(
+            request.post(Json.obj("amountInPence" -> 1200, "taxType" -> "appSimpleAssessment"))
+          )
+          response.status shouldBe 400
+
+        }
+
+        "amountInPence is missing from the request" in {
+          grantAccess()
+          stubForShutteringDisabled
+          getNinoAndUTRFromAuth()
+          stubForP800Response(nino, taxYear, chargeRef1, chargeRef2)
+
+          val request: WSRequest = wsUrl(
+            s"/sessions?journeyId=$journeyId"
+          ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+          val response = await(
+            request.post(Json.obj("reference" -> chargeRef1, "taxType" -> "appSimpleAssessment"))
+          )
+          response.status shouldBe 400
+
+        }
+      }
     }
 
-    "return 500 when response from session is malformed" in {
-      grantAccess()
-      stubForShutteringDisabled
-      stubForCreateSession(response = rawMalformedJson)
-      getUTRFromAuth()
-      getNinoFromAuth()
+    "taxType = not present" should {
 
-      val request: WSRequest = wsUrl(
-        s"/sessions?journeyId=$journeyId"
-      ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
-      val response = await(request.post(Json.obj("amount" -> 1098.3, "saUtr" -> "CS700100A")))
-      response.status shouldBe 500
-    }
+      "return 200 and create session for self assessment payment, if amount and sautr are present and sautr == auth sautr" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForCreateSession(response    = createSessionDataResponseJson)
+        getNinoAndUTRFromAuth(isSaActive = true)
 
-    "return 401 when a 401 is returned from session" in {
-      grantAccess()
-      stubForShutteringDisabled
-      stubForCreateSession(401)
-      getUTRFromAuth()
-      getNinoFromAuth()
-      val request: WSRequest = wsUrl(
-        s"/sessions?journeyId=$journeyId"
-      ).addHttpHeaders(acceptJsonHeader, contentHeader)
-      val response = await(request.post(Json.obj("amount" -> 1200, "saUtr" -> "CS700100A")))
-      response.status shouldBe 401
-    }
+        val request: WSRequest = wsUrl(
+          s"/sessions?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.obj("amount" -> 1200, "saUtr" -> utr)))
+        response.status shouldBe 200
+        val parsedResponse = Json.parse(response.body).as[CreateSessionDataResponse]
+        parsedResponse.sessionDataId.value shouldBe "51cc67d6-21da-11ec-9621-0242ac130002"
+      }
 
-    "return 404 when a 404 is returned from session" in {
-      grantAccess()
-      stubForShutteringDisabled
-      stubForCreateSession(404)
-      getUTRFromAuth()
-      getNinoFromAuth()
+      "return 200 and create session for self assessment payment, if amount and sautr are present and sautr == auth sautr and reference !=sautr" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForCreateSession(response    = createSessionDataResponseJson)
+        getNinoAndUTRFromAuth(isSaActive = true)
 
-      val request: WSRequest = wsUrl(
-        s"/sessions?journeyId=$journeyId"
-      ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
-      val response = await(request.post(Json.obj("amount" -> 1200, "saUtr" -> "CS700100A")))
-      response.status shouldBe 404
-    }
+        val request: WSRequest = wsUrl(
+          s"/sessions?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.obj("amount" -> 1200, "saUtr" -> utr, "reference" -> "123432")))
+        response.status shouldBe 200
+        val parsedResponse = Json.parse(response.body).as[CreateSessionDataResponse]
+        parsedResponse.sessionDataId.value shouldBe "51cc67d6-21da-11ec-9621-0242ac130002"
+      }
 
-    "return 401 when auth fails" in {
-      authorisationRejected()
+      "return 401, if sautr != auth sautr" in {
+        grantAccess()
+        stubForShutteringDisabled
+        stubForCreateSession(response    = createSessionDataResponseJson)
+        getNinoAndUTRFromAuth(isSaActive = true)
 
-      val request: WSRequest = wsUrl(
-        s"/sessions?journeyId=$journeyId"
-      ).addHttpHeaders(acceptJsonHeader, contentHeader)
-      val response = await(request.post(Json.obj("amount" -> 1200, "saUtr" -> "CS700100A")))
-      response.status shouldBe 401
-    }
+        val request: WSRequest = wsUrl(
+          s"/sessions?journeyId=$journeyId"
+        ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+        val response = await(request.post(Json.obj("amount" -> 1200, "saUtr" -> "123432")))
+        response.status shouldBe 401
+      }
+      "return 400, bad request" when {
+        "amount is missing" in {
+          grantAccess()
+          stubForShutteringDisabled
+          getNinoAndUTRFromAuth(isSaActive = true)
 
-    "return 500 when unknown error is returned from session" in {
-      grantAccess()
-      stubForShutteringDisabled
-      stubForCreateSession(500)
-      getUTRFromAuth()
-      getNinoFromAuth()
-
-      val request: WSRequest = wsUrl(
-        s"/sessions?journeyId=$journeyId"
-      ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
-      val response = await(request.post(Json.obj("amount" -> 1200, "saUtr" -> "CS700100A")))
-      response.status shouldBe 500
-    }
-
-    "return 521 when shuttered" in {
-      grantAccess()
-      stubForShutteringEnabled
-
-      val request: WSRequest = wsUrl(
-        s"/sessions?journeyId=$journeyId"
-      ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
-      val response = await(request.post(Json.obj("amount" -> 1200, "saUtr" -> "CS700100A")))
-      response.status shouldBe 521
+          val request: WSRequest = wsUrl(
+            s"/sessions?journeyId=$journeyId"
+          ).addHttpHeaders(acceptJsonHeader, contentHeader, authorisationJsonHeader)
+          val response = await(request.post(Json.obj("saUtr" -> "123432")))
+          response.status shouldBe 400
+        }
+      }
     }
   }
 

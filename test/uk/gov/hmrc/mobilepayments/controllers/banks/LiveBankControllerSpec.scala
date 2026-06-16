@@ -23,7 +23,7 @@ import play.api.test.{FakeRequest, Helpers}
 import uk.gov.hmrc.auth.core.{AuthConnector, ConfidenceLevel}
 import uk.gov.hmrc.http.{HeaderCarrier, UpstreamErrorResponse}
 import uk.gov.hmrc.mobilepayments.MobilePaymentsTestData
-import uk.gov.hmrc.mobilepayments.common.BaseSpec
+import uk.gov.hmrc.mobilepayments.connectors.CitizenDetailsConnector
 import uk.gov.hmrc.mobilepayments.domain.Shuttering
 import uk.gov.hmrc.mobilepayments.domain.dto.response.BanksResponse
 import uk.gov.hmrc.mobilepayments.domain.types.JourneyId
@@ -41,9 +41,11 @@ class LiveBankControllerSpec extends AuthorisationStub with MobilePaymentsTestDa
   implicit val mockShutteringService: ShutteringService = mock[ShutteringService]
   implicit val mockAuditConnector: AuditConnector = mock[AuditConnector]
   implicit val mockAuthConnector: AuthConnector = mock[AuthConnector]
+  implicit val mockCitizenDetailsConnector: CitizenDetailsConnector = mock[CitizenDetailsConnector]
 
   private val sut = new LiveBankController(
     mockAuthConnector,
+    mockCitizenDetailsConnector,
     ConfidenceLevel.L200.level,
     Helpers.stubControllerComponents(),
     mockOpenBankingService,

@@ -168,4 +168,108 @@ object AuthStub {
                """.stripMargin)
         )
     )
+
+  def getNinoAndUTRFromAuth(nino: String = "CS700100A",
+                            saUtr: String = "1122334455",
+                            isSaActive: Boolean = false,
+                            isMtdActive: Boolean = false,
+                            isUtrFromRetrievals: Boolean = true
+                           ): StubMapping =
+    stubFor(
+      post(urlEqualTo("/auth/authorise"))
+        .atPriority(0)
+        .withRequestBody(
+          equalToJson(
+            s"""
+               |{
+               |  "authorise": [],
+               |  "retrieve": [
+               |    "nino",
+               |    "saUtr",
+               |    "allEnrolments"
+               |  ]
+               |}
+             """.stripMargin,
+            true,
+            false
+          )
+        )
+        .willReturn(
+          aResponse()
+            .withStatus(200)
+            .withBody(s"""
+                 |{
+                 |  "allEnrolments": [{
+                 |      "key": "IR-SA",
+                 |      "identifiers": [{
+                 |        "key": "UTR",
+                 |        "value": "$saUtr"
+                 |      }],
+                 |      "state": "${if (isSaActive) "Activated" else "Deactivated"}"
+                 |  },{
+                 |      "key": "HMRC-MTD-IT",
+                 |      "identifiers": [{
+                 |        "key": "MTDITID",
+                 |        "value": "1234567890"
+                 |      }],
+                 |      "state": "${if (isMtdActive) "Activated" else "Deactivated"}"
+                 |  }],
+                 |  "saUtr": "$saUtr",
+                 |  "nino": "$nino"
+                 |}
+
+               """.stripMargin)
+        )
+    )
+
+  def getNinoAndNOUtrInRetreivals(nino: String = "CS700100A",
+                                  saUtr: String = "1122334455",
+                                  isSaActive: Boolean = false,
+                                  isMtdActive: Boolean = false,
+                                  isUtrFromRetrievals: Boolean = true
+                                 ): StubMapping =
+    stubFor(
+      post(urlEqualTo("/auth/authorise"))
+        .atPriority(0)
+        .withRequestBody(
+          equalToJson(
+            s"""
+               |{
+               |  "authorise": [],
+               |  "retrieve": [
+               |    "nino",
+               |    "saUtr",
+               |    "allEnrolments"
+               |  ]
+               |}
+             """.stripMargin,
+            true,
+            false
+          )
+        )
+        .willReturn(
+          aResponse()
+            .withStatus(200)
+            .withBody(s"""
+                 |{
+                 |  "allEnrolments": [{
+                 |      "key": "IR-SA",
+                 |      "identifiers": [{
+                 |        "key": "UTR",
+                 |        "value": "$saUtr"
+                 |      }],
+                 |      "state": "${if (isSaActive) "Activated" else "Deactivated"}"
+                 |  },{
+                 |      "key": "HMRC-MTD-ID",
+                 |      "identifiers": [{
+                 |        "key": "MTDITID",
+                 |        "value": "1234567890"
+                 |      }],
+                 |      "state": "${if (isMtdActive) "Activated" else "Deactivated"}"
+                 |  }],
+                 |  "nino": "$nino"
+                 |}
+               """.stripMargin)
+        )
+    )
 }

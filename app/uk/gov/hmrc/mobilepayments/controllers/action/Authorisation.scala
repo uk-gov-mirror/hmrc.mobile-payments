@@ -22,21 +22,25 @@ import play.api.mvc.*
 import uk.gov.hmrc.api.controllers.*
 import uk.gov.hmrc.auth.core.retrieve.v2.Retrievals.*
 import uk.gov.hmrc.auth.core.retrieve.~
-import uk.gov.hmrc.auth.core.{AuthorisedFunctions, ConfidenceLevel, CredentialStrength}
+import uk.gov.hmrc.auth.core.{AuthorisedFunctions, ConfidenceLevel, CredentialStrength, Enrolments}
 import uk.gov.hmrc.domain.SaUtr
 import uk.gov.hmrc.http.{HeaderCarrier, UpstreamErrorResponse}
-import uk.gov.hmrc.mobilepayments.controllers.errors.{AccountWithLowCL, ErrorUnauthorizedNoUtr, FailToMatchTaxIdOnAuth, ForbiddenAccess, UtrNotFoundOnAccount}
+import uk.gov.hmrc.mobilepayments.connectors.CitizenDetailsConnector
+import uk.gov.hmrc.mobilepayments.controllers.errors.{AccountWithLowCL, ErrorUnauthorizedNoUtr, FailToMatchTaxIdOnAuth, ForbiddenAccess, NinoNotFoundOnAccount, UtrNotFoundOnAccount}
 import uk.gov.hmrc.play.http.HeaderCarrierConverter
 
 import scala.concurrent.{ExecutionContext, Future}
 
 trait Authorisation extends Results with AuthorisedFunctions {
 
+  val cdConnector: CitizenDetailsConnector
   val confLevel: Int
   private val logger: Logger = Logger(this.getClass)
 
   lazy val requiresAuth = true
   private lazy val lowConfidenceLevel = new AccountWithLowCL
+  private lazy val noNinoFound = new NinoNotFoundOnAccount
+  private lazy val utrNotFoundOnAccount = new UtrNotFoundOnAccount
 
   def grantAccess()(implicit hc: HeaderCarrier, ec: ExecutionContext): Future[Boolean] =
     authorised(CredentialStrength("strong") and ConfidenceLevel.L200)
@@ -50,7 +54,6 @@ trait Authorisation extends Results with AuthorisedFunctions {
     block: Request[A] => Future[Result]
   )(implicit ec: ExecutionContext): Future[Result] = {
     implicit val hc: HeaderCarrier = HeaderCarrierConverter.fromRequest(request)
-
     grantAccess()
       .flatMap { _ =>
         block(request)
@@ -72,6 +75,44 @@ trait Authorisation extends Results with AuthorisedFunctions {
           logger.info("Unauthorized! Account with low CL!")
           Unauthorized(Json.toJson(ErrorUnauthorizedLowCL.asInstanceOf[ErrorResponse]))
       }
+  }
+
+  private def getSAEnrolledUtr(enrolments: Enrolments): Option[SaUtr] =
+    enrolments.enrolments
+      .find(_.key == "IR-SA")
+      .flatMap { enrolment =>
+        enrolment.identifiers
+          .find(id => id.key == "UTR" && enrolment.state == "Activated")
+          .map(key => SaUtr(key.value))
+      }
+
+  private def hasMTDEnrolment(enrolments: Enrolments): Option[Boolean] =
+    enrolments.enrolments
+      .find(_.key == "HMRC-MTD-ID")
+      .flatMap { enrolment =>
+        enrolment.identifiers
+          .find(id => id.key.toUpperCase == "MTDITID" && enrolment.state == "Activated")
+          .map(key => true)
+      }
+
+  def getUtrFromEnrolments(enrolments: Enrolments, foundNino: Option[String], sautrOpt: Option[String])(implicit
+    hc: HeaderCarrier,
+    ec: ExecutionContext
+  ): Future[Option[SaUtr]] = {
+    (getSAEnrolledUtr(enrolments), hasMTDEnrolment(enrolments), sautrOpt) match {
+      case (Some(sautr), _, Some(retrieveUtr)) if sautr.utr == retrieveUtr => Future.successful(Some(sautr))
+      case (Some(sautr), _, Some(retrieveUtr)) if sautr.utr != retrieveUtr => Future.successful(None)
+      case (None, _, Some(retrieveUtr)) =>
+        Future.successful(Some(SaUtr(retrieveUtr))) // this case might happen in case of MTD only enrolment
+      case (Some(sautr), _, None) =>
+        Future.successful(Some(sautr))
+      case (None, Some(true), None) => // calling cid connector  if there is MTD only enrolment and no IR-SA, otherwise pick sautr from SA enrolment
+        cdConnector.getUtrByNino(foundNino.getOrElse("")).map {
+          case Some(utr) => Some(utr)
+          case _         => None
+        }
+      case _ => Future.successful(None)
+    }
   }
 
 }
@@ -103,34 +144,15 @@ trait AccessControl extends HeaderValidator with Authorisation {
           )
     }
 
-  def getNinoFromAuth(implicit
+  def getNinoAndUtrFromAuth(implicit
     hc: HeaderCarrier,
     ec: ExecutionContext
-  ): Future[Option[String]] =
-    authorised().retrieve(nino)(foundNino => Future successful foundNino)
-
-  def getSaUTRFromAuth(implicit
-    hc: HeaderCarrier,
-    ec: ExecutionContext
-  ): Future[Option[SaUtr]] =
+  ): Future[(Option[SaUtr], Option[String])] = {
     authorised()
-      .retrieve(saUtr and allEnrolments) { case sautrOpt ~ enrolments =>
-        val enrolmentSautr: Option[String] = enrolments.enrolments
-          .find(enKey => enKey.key == "IR-SA")
-          .flatMap { enrolment =>
-            enrolment.identifiers
-              .find(id => id.key.toUpperCase == "UTR" && enrolment.state == "Activated")
-              .map(key => key.value)
-          }
-
-        (sautrOpt, enrolmentSautr) match {
-          case (Some(utr1), Some(enrolmentUtr)) =>
-            if (enrolmentUtr == utr1) Future.successful(enrolmentSautr.map(SaUtr(_))) else Future.successful(None)
-          case (None, enrolmentUtrOpt) => Future.successful(enrolmentSautr.map(SaUtr(_)))
-          case (sautrOpt, None)        => Future.successful(sautrOpt.map(SaUtr(_)))
-          case _                       => Future.successful(None)
-
-        }
+      .retrieve(nino and saUtr and allEnrolments) {
+        case foundNino ~ sautrOpt ~ enrolments => getUtrFromEnrolments(enrolments, foundNino, sautrOpt).map(utrOpt => (utrOpt, foundNino))
+        case _                                 => Future.successful(None, None)
       }
+  }
 
 }
